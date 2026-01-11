@@ -1,0 +1,804 @@
+"""
+Benchmarking script to evaluate multiple models on specific questions.
+Parses question files, calls models via ModelAPI, and generates reports.
+"""
+
+import os
+import glob
+import re
+import subprocess
+import sys
+from datetime import datetime
+from typing import Any, Dict, List
+from model_api import ModelAPI
+from openai import OpenAIError
+from utils import setup_logging, parse_question_file, kill_process_on_port
+from evaluators import JudgeLLMEvaluator, HumanEvaluator, ValidityEvaluator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = setup_logging(__name__)
+
+NUM_RUNS = 4
+
+def resolve_question_path(question_code: str) -> str | None:
+    """
+    Finds the file path for a given question code (e.g., 'A2') starting with that code.
+    Ensures that 'A2' does not match 'A22' by checking the character following the code.
+    """
+    # Search recursively in the questions directory
+    search_pattern = f"questions/**/{question_code}*.txt"
+    matches = glob.glob(search_pattern, recursive=True)
+
+    if not matches:
+        return None
+
+    # Filter matches to ensure exact code prefix (e.g., A2 followed by - or .)
+    for match in matches:
+        basename = os.path.basename(match)
+        # Check if basename starts with code and the next char is not a digit
+        if basename.startswith(question_code):
+            remaining = basename[len(question_code):]
+            if not remaining or not remaining[0].isdigit():
+                return match
+
+    return None
+
+
+def print_benchmark_summary(models: List[str], questions_data: Dict[str, Dict[str, Any]], question_codes: List[str]) -> None:
+    """
+    Prints the benchmark summary to the console.
+    """
+    print("\nModels benchmarked:")
+    for model in models:
+        print(f"- {model}")
+
+    print("\nQuestions in the run:")
+    for code in question_codes:
+        data = questions_data.get(code, {})
+        eval_type = data.get("eval_type", "Unknown")
+        print(f"- {code} ({eval_type})")
+    
+def write_advanced_results_file(
+    models: List[str],
+    question_codes: List[str],
+    all_results: Dict[str, Dict[str, Any]],
+    questions_data: Dict[str, Dict[str, Any]],
+    timestamp: str | None = None
+) -> str:
+    """
+    Writes comprehensive advanced benchmark results to a timestamped file.
+    Includes full model responses, reasoning, and all evaluation details for ALL runs.
+    Returns the path to the created file.
+    """
+    # Create results_advanced directory if it doesn't exist
+    results_dir = "results_advanced"
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Use provided timestamp or generate new one
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"benchmark_results_advanced_{timestamp}.txt"
+    filepath = os.path.join(results_dir, filename)
+    
+    with open(filepath, "w") as f:
+        # Header section
+        f.write("=" * 100 + "\n")
+        f.write("ADVANCED BENCHMARK RESULTS - DETAILED REPORT\n")
+        f.write("=" * 100 + "\n\n")
+        
+        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        # Summary Section
+        f.write("Models benchmarked:\n")
+        for model in models:
+            f.write(f"- {model}\n")
+        
+        f.write("\nQuestions in the run:\n")
+        for code in question_codes:
+            eval_type = questions_data.get(code, {}).get("eval_type", "Unknown")
+            f.write(f"- {code} ({eval_type})\n")
+        f.write("\n")
+        
+        f.write("=" * 100 + "\n\n")
+        
+        # Detailed results by question
+        for idx, code in enumerate(question_codes, 1):
+            question_text = questions_data.get(code, {}).get("question", "N/A")
+            ground_truth = questions_data.get(code, {}).get("ground_truth", "N/A")
+            points = questions_data.get(code, {}).get("points", 1)
+            
+            f.write(f"\n{'#' * 100}\n")
+            f.write(f"QUESTION {idx}: {code}\n")
+            f.write(f"{'#' * 100}\n\n")
+            
+            f.write("QUESTION TEXT:\n")
+            f.write("-" * 100 + "\n")
+            # Skip full prompt for very long questions (e.g., A58 BattleShip)
+            if len(question_text) > 1000:
+                f.write(f"[Prompt omitted - {len(question_text)} chars]\n")
+            else:
+                f.write(f"{question_text}\n")
+            f.write("-" * 100 + "\n\n")
+            
+            f.write(f"POINTS: {points}\n")
+            f.write(f"EXPECTED ANSWER: {ground_truth}\n\n")
+            f.write("=" * 100 + "\n\n")
+            
+            # Results for each model on this question
+            for model in models:
+                model_data = all_results.get(code, {}).get(model, {})
+                runs = model_data.get("runs", [])
+                score = model_data.get("score", 0.0)
+                
+                f.write(f"MODEL: {model}\n")
+                f.write(f"SCORE: {score:.2f}/{points:.2f}\n")
+                f.write("-" * 100 + "\n\n")
+
+                for run_idx, run_result in enumerate(runs, 1):
+                    f.write(f"--- RUN #{run_idx} ---\n")
+                    
+                    # Model thinking/reasoning (if available)
+                    model_reasoning = run_result.get("model_reasoning")
+                    if model_reasoning:
+                        f.write("MODEL THINKING/REASONING:\n")
+                        f.write(f"{model_reasoning}\n\n")
+                    
+                    # Model response
+                    model_response = run_result.get("response", "N/A")
+                    f.write("MODEL RESPONSE:\n")
+                    # Skip full response if it contains code blocks
+                    if "```" in model_response:
+                        f.write(f"[Response omitted - contains code ({len(model_response)} chars)]\n\n")
+                    else:
+                        f.write(f"{model_response}\n\n")
+                    
+                    # Judge evaluation
+                    judge_reasoning = run_result.get("judge_reasoning", "N/A")
+                    judge_verdict = run_result.get("judge_verdict", "N/A")
+                    
+                    f.write("JUDGE EVALUATION:\n")
+                    f.write(f"{judge_reasoning}\n\n")
+                    
+                    f.write(f"JUDGE VERDICT: {judge_verdict}\n\n")
+                    
+                    # Final result for this run
+                    if judge_verdict == "Pending":
+                        evaluation = "PENDING (Human Eval Required)"
+                    elif "run_score" in run_result:
+                        evaluation = f"{run_result['run_score']}/{run_result['run_max']} pts"
+                    else:
+                        evaluation = "PASS" if run_result.get("success", False) else "FAIL"
+                    f.write(f"RUN RESULT: {evaluation}\n\n")
+                
+                f.write("\n" + "=" * 100 + "\n\n")
+        
+        # Rankings section (only for non-human-eval questions)
+        # Check if there are any non-human-eval questions
+        non_human_eval_codes = [code for code in question_codes 
+                                if not questions_data.get(code, {}).get("is_manual_check", False)]
+        
+        if non_human_eval_codes:
+            f.write("\n" + "#" * 100 + "\n")
+            f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
+            f.write("#" * 100 + "\n\n")
+            
+            # Calculate weighted scores (excluding human eval questions)
+            scores = {}
+            total_possible_points = 0
+            for model in models:
+                score = 0
+                for code in non_human_eval_codes:
+                    model_data = all_results.get(code, {}).get(model, {})
+                    score += model_data.get("score", 0.0)
+                scores[model] = score
+            
+            # Calculate total possible points (excluding human eval)
+            for code in non_human_eval_codes:
+                total_possible_points += questions_data.get(code, {}).get("points", 1)
+            
+            # Sort by score descending
+            ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            
+            for rank, (model, score) in enumerate(ranked, 1):
+                percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%)\n")
+            
+            f.write("\n" + "=" * 100 + "\n")
+        
+        # Note about human eval questions if any exist
+        human_eval_codes = [code for code in question_codes 
+                            if questions_data.get(code, {}).get("is_manual_check", False)]
+        if human_eval_codes:
+            f.write("\n" + "#" * 100 + "\n")
+            f.write("HUMAN EVALUATION PENDING\n")
+            f.write("#" * 100 + "\n\n")
+            f.write("The following questions require human evaluation:\n")
+            for code in human_eval_codes:
+                points = questions_data.get(code, {}).get("points", 1)
+                f.write(f"  - {code} ({points} points)\n")
+            f.write("\nHuman evaluation server was spawned automatically.\n")
+            f.write("Complete scoring in the browser windows - this report will be updated.\n")
+            f.write("\n" + "=" * 100 + "\n")
+    
+    return filepath
+
+
+def write_results_file(
+    models: List[str],
+    question_codes: List[str],
+    all_results: Dict[str, Dict[str, Any]],
+    questions_data: Dict[str, Dict[str, Any]],
+    timestamp: str | None = None
+) -> str:
+    """
+    Writes benchmark results to a timestamped file in the results directory.
+    Returns the path to the created file.
+    """
+    # Create results directory if it doesn't exist
+    results_dir = "results"
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Use provided timestamp or generate new one
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"benchmark_results_{timestamp}.txt"
+    filepath = os.path.join(results_dir, filename)
+    
+    with open(filepath, "w") as f:
+        # Header section
+        f.write("=" * 80 + "\n")
+        f.write("BENCHMARK RESULTS\n")
+        f.write("=" * 80 + "\n\n")
+        
+        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        # Summary Section
+        f.write("Models benchmarked:\n")
+        for model in models:
+            f.write(f"- {model}\n")
+        
+        f.write("\nQuestions in the run:\n")
+        for code in question_codes:
+            eval_type = questions_data.get(code, {}).get("eval_type", "Unknown")
+            f.write(f"- {code} ({eval_type})\n")
+        f.write("\n")
+        
+        f.write("=" * 80 + "\n\n")
+        
+        # Results by model
+        for model in models:
+            f.write(f"{model.upper()} RESULTS:\n")
+            f.write("-" * 80 + "\n\n")
+            
+            for idx, code in enumerate(question_codes, 1):
+                model_data = all_results.get(code, {}).get(model, {})
+                expected = questions_data.get(code, {}).get("ground_truth", "N/A")
+                score = model_data.get("score", 0.0)
+                points = questions_data.get(code, {}).get("points", 1)
+                is_human_eval = questions_data.get(code, {}).get("is_manual_check", False)
+                
+                f.write(f"Question {idx} ({code}):\n")
+                f.write(f"  Expected: {expected}\n")
+                
+                if is_human_eval:
+                    f.write(f"  Score: PENDING (Human Eval)\n")
+                    f.write(f"  Runs: PENDING\n\n")
+                else:
+                    f.write(f"  Score: {score:.2f}/{points}\n")
+                    # List brief verdict for each run (with granular scores if available)
+                    runs = model_data.get("runs", [])
+                    run_verdicts = []
+                    for run in runs:
+                        if "run_score" in run:
+                            run_verdicts.append(f"{run['run_score']}/{run['run_max']}")
+                        elif run.get("success", False):
+                            run_verdicts.append("PASS")
+                        else:
+                            run_verdicts.append("FAIL")
+                    f.write(f"  Runs: {', '.join(run_verdicts)}\n\n")
+            
+            f.write("\n")
+        
+        # Rankings (only for non-human-eval questions)
+        non_human_eval_codes = [code for code in question_codes 
+                                if not questions_data.get(code, {}).get("is_manual_check", False)]
+        
+        if non_human_eval_codes:
+            f.write("=" * 80 + "\n")
+            f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # Calculate weighted scores (excluding human eval)
+            scores = {}
+            total_possible_points = 0
+            for model in models:
+                score = 0
+                for code in non_human_eval_codes:
+                    model_data = all_results.get(code, {}).get(model, {})
+                    score += model_data.get("score", 0.0)
+                scores[model] = score
+            
+            # Calculate total possible points (excluding human eval)
+            for code in non_human_eval_codes:
+                total_possible_points += questions_data.get(code, {}).get("points", 1)
+            
+            # Sort by score descending
+            ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            
+            for rank, (model, score) in enumerate(ranked, 1):
+                percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%)\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+        
+        # Note about human eval questions
+        human_eval_codes = [code for code in question_codes 
+                           if questions_data.get(code, {}).get("is_manual_check", False)]
+        if human_eval_codes:
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("HUMAN EVALUATION PENDING\n")
+            f.write("=" * 80 + "\n\n")
+            f.write("Questions pending human evaluation:\n")
+            for code in human_eval_codes:
+                points = questions_data.get(code, {}).get("points", 1)
+                f.write(f"  - {code} ({points} points)\n")
+            f.write("\nHuman evaluation server was spawned automatically.\n")
+            f.write("Complete scoring in the browser windows - this report will be updated.\n")
+            f.write("\n" + "=" * 80 + "\n")
+    
+    return filepath
+
+
+def process_single_run(
+    api: ModelAPI,
+    model_name: str,
+    model_index: int,
+    question_code: str,
+    question: str,
+    ground_truth: str,
+    points: int,
+    judge: JudgeLLMEvaluator,
+    validity_eval: ValidityEvaluator,
+    human_eval: HumanEvaluator
+) -> Dict[str, Any]:
+    """
+    Executes a single run for a model on a question and returns the result.
+    """
+    try:
+        # Calculate effective max tokens based on question points
+        effective_max_tokens = api.max_tokens * points
+        
+        # Call the model with ONLY the question and effective max tokens
+        response = api.call(question, model_index=model_index, max_tokens=effective_max_tokens)
+
+        # Extract content and reasoning for advanced results
+        message = response.choices[0].message
+        content = message.content or ""
+        reasoning_details = getattr(message, "reasoning_details", None)
+
+        # Evaluation logic
+        judge_reasoning = None
+        judge_verdict = None
+
+        if ground_truth:
+            if ground_truth.upper().strip() == "VALIDITY CHECK":
+                eval_result = validity_eval.evaluate(question_code, question, content)
+                is_successful = eval_result["success"]
+                judge_reasoning = eval_result["reasoning"]
+                judge_verdict = eval_result["verdict"]
+            else:
+                eval_result = judge.evaluate(question, ground_truth, content)
+                is_successful = eval_result["success"]
+                judge_reasoning = eval_result["reasoning"]
+                judge_verdict = eval_result["verdict"]
+        else:
+            human_eval.evaluate(question, content)
+            is_successful = False
+            judge_reasoning = "Registered for Human Evaluation"
+            judge_verdict = "Pending"
+
+        return {
+            "success": is_successful,
+            "response": content,
+            "model_reasoning": reasoning_details,
+            "judge_reasoning": judge_reasoning,
+            "judge_verdict": judge_verdict
+        }
+
+    except (OpenAIError, IndexError, Exception) as e:
+        logger.error("Error in run for model %s question %s: %s", model_name, question_code, e)
+        return {
+            "success": False,
+            "response": f"ERROR: {str(e)}",
+            "model_reasoning": None,
+            "judge_reasoning": f"ERROR: {str(e)}",
+            "judge_verdict": "Error",
+            "error": str(e)
+        }
+
+
+def run_benchmark() -> None:
+    """
+    Executes the benchmark for questions defined in questions.txt across all loaded models.
+    """
+    questions_file = "questions.txt"
+    if not os.path.exists(questions_file):
+        logger.error("questions.txt not found.")
+        return
+
+    with open(questions_file, "r") as f:
+        question_codes = [line.strip() for line in f if line.strip()]
+
+    if not question_codes:
+        logger.error("No question codes found in questions.txt")
+        return
+
+    try:
+        api = ModelAPI()
+        judge = JudgeLLMEvaluator()
+        human_eval = HumanEvaluator()
+        validity_eval = ValidityEvaluator()
+    except (ValueError, Exception) as e:
+        logger.error("Failed to initialize system: %s", e)
+        return
+
+    # Handle "ALL" keyword
+    if any(line.upper() == "ALL" for line in question_codes):
+        logger.info("Found 'ALL' in questions.txt. Loading all available questions...")
+        all_files = glob.glob("questions/**/*.txt", recursive=True)
+        question_codes = []
+        for fpath in all_files:
+            fname = os.path.basename(fpath)
+            # Filter out exclude files
+            if fname in ["html_css_js_questions_prefix.txt", "readme.txt", "README.txt"]:
+                continue
+            
+            # Use filename without extension as the code
+            # This works with resolve_question_path logic since it matches prefixes
+            code = os.path.splitext(fname)[0]
+            question_codes.append(code)
+        
+        # Sort for consistent order
+        question_codes.sort()
+        logger.info("Discovered %d questions.", len(question_codes))
+
+        # List questions and ask for confirmation
+        print("\nQuestions to be run:")
+        for idx, code in enumerate(question_codes, 1):
+            print(f"{idx}. {code}")
+            
+        confirmation = input(f"\nAre you sure you want to run these {len(question_codes)} questions? (y/n): ")
+        if confirmation.lower() != 'y':
+            print("Execution cancelled by user.")
+            return
+
+    all_results: Dict[str, Dict[str, Any]] = {} 
+    questions_data: Dict[str, Dict[str, Any]] = {}  # {question_code: {question, ground_truth, points, eval_type}}
+
+    # Load prefix for manual checks
+    prefix_file = "questions/html_css_js_questions_prefix.txt"
+    prefix = ""
+    if os.path.exists(prefix_file):
+        with open(prefix_file, "r") as f:
+            prefix = f.read().strip()
+    else:
+        logger.warning("Prefix file %s not found.", prefix_file)
+
+    # Pre-load all questions and determine evaluation type
+    logger.info("Loading questions...")
+    valid_question_codes = []
+    
+    for code in question_codes:
+        question_path = resolve_question_path(code)
+        if not question_path:
+            logger.error("Could not find question file for code: %s", code)
+            continue
+
+        try:
+            with open(question_path, "r") as f:
+                file_content = f.read()
+        except OSError as e:
+            logger.error("Failed to read question file at %s: %s", question_path, e)
+            continue
+
+        question, ground_truth, points = parse_question_file(file_content)
+
+        # Prepend prefix if question is in manual_checks directory (except Leetcode questions)
+        is_leetcode = "Leetcode" in os.path.basename(question_path)
+        if "manual_checks" in question_path and not is_leetcode:
+            question = f"{prefix}\n\n{question}"
+
+        # Determine Evaluation Type
+        if not ground_truth:
+            eval_type = "eval by HumanEval"
+        elif ground_truth.upper().strip() == "VALIDITY CHECK":
+            eval_type = "eval by hardcoded validity checks"
+        else:
+            eval_type = "eval by Judge LLM"
+
+        questions_data[code] = {
+            "question": question,
+            "ground_truth": ground_truth if ground_truth else "N/A",
+            "points": points,
+            "eval_type": eval_type,
+            "is_manual_check": "manual_checks" in question_path
+        }
+        all_results[code] = {}
+        valid_question_codes.append(code)
+
+    if not valid_question_codes:
+        logger.error("No valid questions found to benchmark.")
+        return
+
+    # Generate a single timestamp for all output files in this run
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Check if any manual check questions exist and start session
+    has_manual_checks = any(
+        questions_data[code].get("is_manual_check", False)
+        for code in valid_question_codes
+    )
+
+    if has_manual_checks:
+        human_eval.start_session(run_timestamp)
+
+    # Partition questions: human eval first, then automated
+    human_eval_codes = [c for c in valid_question_codes 
+                        if questions_data[c].get("is_manual_check", False)]
+    non_human_eval_codes = [c for c in valid_question_codes 
+                            if not questions_data[c].get("is_manual_check", False)]
+    sorted_question_codes = human_eval_codes + non_human_eval_codes
+    
+    # Print Summary to Console (use original order for display)
+    print_benchmark_summary(api.models, questions_data, valid_question_codes)
+
+    # Track whether subprocess has been spawned
+    human_eval_server_spawned = False
+
+    # ThreadPoolExecutor for parallel runs
+    # We want max parallelism, but let's limit to something reasonable like 16 threads
+    # (e.g. 4 models * 4 runs = 16 concurrent requests)
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        
+        for code in sorted_question_codes:
+            data = questions_data[code]
+            question = data["question"]
+            ground_truth = data["ground_truth"]
+            # Convert "N/A" back to None/Empty if needed for logic, but process_single_run handles strings. 
+            # Note: parse_question_file returns None for empty GT? Check. 
+            # Actually process_single_run expects ground_truth string.
+            # If "N/A" was stored, we should be careful. 
+            # data["ground_truth"] stores "N/A" if empty.
+            # Let's revert to None if "N/A" for the logic check in process_single_run or fix logic.
+            # actually parse_question_file returns None or string.
+            # Stored as "N/A" in dict.
+            # process_single_run logic: `if ground_truth:`
+            # If we pass "N/A", it evaluates as true.
+            # So we should pass the original ground truth or handle "N/A".
+            # Let's clean this up. parse_question_file returns None if missing.
+            # In questions_data assignment above: "ground_truth": ground_truth if ground_truth else "N/A"
+            # So we lost the None-ness.
+            
+            # Correction: Let's use the eval_type to determine what to pass or just fix the storage.
+            # Simpler: Pass proper ground_truth.
+            gt_for_run = ground_truth if ground_truth != "N/A" else None
+            points = data["points"]
+            
+            logger.info("\n" + "=" * 60)
+            logger.info("PROCESSING QUESTION: %s", code)
+            logger.info("=" * 60)
+            # Truncate very long prompts in console logs (e.g., A58 BattleShip)
+            if len(question) > 1000:
+                logger.info("--- Question [%s] (Points: %d) ---\n[Prompt truncated - %d chars]\n-----------------\n", code, points, len(question))
+            else:
+                logger.info("--- Question [%s] (Points: %d) ---\n%s\n-----------------\n", code, points, question)
+            
+            if gt_for_run:
+                logger.info("[*] Expected Ground Truth: %s\n", gt_for_run)
+
+            # Dictionary to hold futures for this question
+            # Key: future, Value: (model_name, run_index)
+            futures_map = {}
+
+            # Submit all runs for all models for this question
+            for i, model_name in enumerate(api.models):
+                all_results[code][model_name] = {"runs": [], "score": 0.0}
+                
+                logger.info("[*] Submitting %d runs for Model: %s...", NUM_RUNS, model_name)
+                
+                for run_idx in range(NUM_RUNS):
+                    future = executor.submit(
+                        process_single_run,
+                        api=api,
+                        model_name=model_name,
+                        model_index=i,
+                        question_code=code,
+                        question=question,
+                        ground_truth=gt_for_run,
+                        points=points,
+                        judge=judge,
+                        validity_eval=validity_eval,
+                        human_eval=human_eval
+                    )
+                    futures_map[future] = (model_name, run_idx)
+
+            # Collect results as they complete
+            completed_counts = {model: 0 for model in api.models}
+            
+            for future in as_completed(futures_map):
+                model_name, run_idx = futures_map[future]
+                try:
+                    result = future.result()
+                    all_results[code][model_name]["runs"].append(result)
+                    
+                    completed_counts[model_name] += 1
+                    
+                    # Extract detailed info from judge_reasoning if available
+                    judge_info = result.get("judge_reasoning", "")
+                    if result.get("judge_verdict") == "Pending":
+                        status = "PENDING"
+                    elif result["success"]:
+                        status = f"PASS - {judge_info}" if judge_info else "PASS"
+                    else:
+                        status = f"FAIL - {judge_info}" if judge_info else "FAIL"
+                    
+                    logger.info("    [%s] Run (%d/%d): %s", 
+                                model_name, completed_counts[model_name], NUM_RUNS, status)
+                    
+                    # Save implementation for manual check questions
+                    if questions_data[code].get("is_manual_check", False):
+                        human_eval.save_implementation(
+                            model_name=model_name,
+                            question_code=code,
+                            run_index=run_idx,
+                            html_content=result.get("response", "")
+                        )
+                    
+                except Exception as e:
+                    logger.error("Use-case error collecting future for %s run %d: %s", model_name, run_idx, e)
+
+            # Calculate scores for this question
+            logger.info("\n--- Results for Question %s ---", code)
+            for model_name in api.models:
+                runs = all_results[code][model_name]["runs"]
+                
+                # Check if this is a granular scoring question (parse SCORE:X/Y from reasoning)
+                total_run_score = 0.0
+                has_granular_scores = False
+                
+                for r in runs:
+                    reasoning = r.get("judge_reasoning", "")
+                    # Try to parse "SCORE:X/Y" pattern
+                    import re
+                    score_match = re.search(r'SCORE:(\d+)/(\d+)', reasoning)
+                    if score_match:
+                        has_granular_scores = True
+                        run_score = int(score_match.group(1))
+                        run_max = int(score_match.group(2))
+                        # Store the run's granular score for display
+                        r["run_score"] = run_score
+                        r["run_max"] = run_max
+                        # Normalize to question's point value
+                        total_run_score += (run_score / run_max) * points
+                    else:
+                        # Fallback: binary success = full points, fail = 0
+                        if r.get("success", False):
+                            total_run_score += points
+                
+                # Average across all runs
+                score = total_run_score / NUM_RUNS if NUM_RUNS > 0 else 0
+                all_results[code][model_name]["score"] = score
+                
+                if has_granular_scores:
+                    # Show detailed per-run scores
+                    run_details = []
+                    for r in runs:
+                        if "run_score" in r:
+                            run_details.append(f"{r['run_score']}/{r['run_max']}")
+                        else:
+                            run_details.append("?" if not r.get("success") else "PASS")
+                    logger.info("Model: %-30s | Score: %.2f/%d (runs: %s)", 
+                                model_name, score, points, ", ".join(run_details))
+                else:
+                    success_count = sum(1 for r in runs if r.get("success", False))
+                    logger.info("Model: %-30s | Score: %.2f/%d (%d/%d PASS)", 
+                                model_name, score, points, success_count, NUM_RUNS)
+            
+            # After last human eval question completes, finalize session and spawn server
+            if (has_manual_checks 
+                and human_eval_codes 
+                and code == human_eval_codes[-1] 
+                and not human_eval_server_spawned):
+                
+                human_eval.finalize_session()
+                session_dir = human_eval.get_session_dir()
+                
+                logger.info("\n" + "=" * 60)
+                logger.info("SPAWNING HUMAN EVALUATION SERVER")
+                logger.info("=" * 60)
+                logger.info("Human eval questions complete. Spawning server in background.")
+                logger.info("Session directory: %s", session_dir)
+                logger.info("Automated questions will continue processing.")
+                logger.info("=" * 60 + "\n")
+                
+                # Spawn subprocess detached from parent
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                server_script = os.path.join(script_dir, "human_eval_server.py")
+                
+                logger.info("Launching: %s %s", server_script, session_dir)
+                
+                # Kill any existing server instance on this port
+                logger.info("Ensuring port 8765 is free...")
+                kill_process_on_port(8765)
+                
+                # Don't use start_new_session - it breaks webbrowser.open() 
+                # as it loses access to the display environment
+                subprocess.Popen(
+                    [sys.executable, server_script, session_dir],
+                    cwd=script_dir
+                )
+                human_eval_server_spawned = True
+
+    # Write results files
+    logger.info("\n" + "=" * 60)
+    logger.info("GENERATING RESULTS FILES")
+    logger.info("=" * 60)
+    
+    results_file_path = write_results_file(
+        models=api.models,
+        question_codes=valid_question_codes,
+        all_results=all_results,
+        questions_data=questions_data,
+        timestamp=run_timestamp
+    )
+
+    logger.info("[+] Results file written to: %s", results_file_path)
+
+    advanced_results_path = write_advanced_results_file(
+        models=api.models,
+        question_codes=valid_question_codes,
+        all_results=all_results,
+        questions_data=questions_data,
+        timestamp=run_timestamp
+    )
+    
+    logger.info("[+] Advanced results file written to: %s", advanced_results_path)
+    
+    # Update manifest with results file paths so integrate_scores uses the correct files
+    if has_manual_checks:
+        human_eval.update_results_paths(results_file_path, advanced_results_path)
+        
+        # Check if human evaluation is already complete
+        session_dir = human_eval.get_session_dir()
+        manifest_path = os.path.join(session_dir, "manifest.json")
+        
+        import json
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+        
+        if manifest.get("scores_collected", False):
+            # Human eval finished before benchmark - integrate now
+            logger.info("\n" + "=" * 60)
+            logger.info("INTEGRATING HUMAN EVALUATION SCORES")
+            logger.info("=" * 60)
+            
+            from integrate_human_scores import integrate_scores
+            integrate_scores(session_dir)
+            
+            logger.info("Human evaluation scores integrated into results files.")
+        else:
+            # Human eval still in progress
+            logger.info("\n" + "=" * 60)
+            logger.info("HUMAN EVALUATION IN PROGRESS")
+            logger.info("=" * 60)
+            logger.info("Human evaluation server is running in the background.")
+            logger.info("Session directory: %s", session_dir)
+            logger.info("Complete scoring in the browser windows.")
+            logger.info("After scoring, run: uv run integrate_human_scores.py %s", session_dir)
+    
+    logger.info("=" * 60)
+
+
+if __name__ == "__main__":
+    run_benchmark()
+
