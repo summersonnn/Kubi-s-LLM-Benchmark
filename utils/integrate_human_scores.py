@@ -38,7 +38,7 @@ def calculate_scores(manifest: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
     Returns: {question_code: {model_name: average_score}}
     """
     # Group scores by (question_code, model_name)
-    grouped: Dict[tuple, List[int]] = {}
+    grouped: Dict[tuple, List[float]] = {}
     
     for impl in manifest.get("implementations", []):
         key = (impl["question_code"], impl["model_name"])
@@ -82,7 +82,7 @@ def update_results_file(
 ) -> None:
     """
     Updates an existing results file with human evaluation scores.
-    For manual check questions, replaces the score with: (avg_score / 10) * points
+    Scores are absolute values (0 to max_points) set directly by human evaluators.
     """
     with open(filepath, "r") as f:
         content = f.read()
@@ -119,8 +119,8 @@ def update_results_file(
                 # Match if current_model contains model_name or vice versa
                 if current_model and (model_lower in current_model or current_model in model_lower or 
                                       model_lower.split("/")[-1] in current_model):
-                    points = question_points.get(current_question, 1)
-                    matched_score = (avg / 10) * points
+                    # Scores are absolute, use directly
+                    matched_score = avg
                     break
             
             if matched_score is not None:
@@ -139,7 +139,7 @@ def update_results_file(
                 if current_model and (model_lower in current_model or current_model in model_lower or
                                       model_lower.split("/")[-1] in current_model):
                     indent = len(line) - len(line.lstrip())
-                    updated_lines.append(" " * indent + f"Runs: Human Eval (avg: {avg:.1f}/10)")
+                    updated_lines.append(" " * indent + f"Runs: Human Eval (avg: {avg:.1f}/{points})")
                     replaced = True
                     break
             if replaced:
@@ -163,8 +163,8 @@ def update_results_file(
         points = question_points.get(question_code, 1)
         addendum.append(f"Question {question_code} (Points: {points}):")
         for model_name, avg in sorted(model_scores.items()):
-            final_score = (avg / 10) * points
-            addendum.append(f"  {model_name}: {avg:.1f}/10 avg -> {final_score:.2f}/{points} pts")
+            # Scores are absolute, avg is the final score
+            addendum.append(f"  {model_name}: {avg:.2f}/{points} pts")
         addendum.append("")
     
     addendum.append("=" * 80)
@@ -197,8 +197,8 @@ def generate_human_eval_summary(
             f.write("-" * 40 + "\n")
             
             for model_name, avg in sorted(model_scores.items()):
-                final_score = (avg / 10) * points
-                f.write(f"  {model_name}: {avg:.1f}/10 avg -> {final_score:.2f}/{points} pts\n")
+                # Scores are absolute, avg is the final score
+                f.write(f"  {model_name}: {avg:.2f}/{points} pts\n")
             
             f.write("\n")
         
@@ -230,8 +230,8 @@ def generate_standalone_results(
     for question_code, model_scores in scores.items():
         points = question_points.get(question_code, 1)
         for model_name, avg in model_scores.items():
-            final_score = (avg / 10) * points
-            model_totals[model_name] += final_score
+            # Scores are absolute, avg is the final score
+            model_totals[model_name] += avg
 
     with open(filepath, "w") as f:
         f.write("=" * 80 + "\n")
@@ -257,11 +257,10 @@ def generate_standalone_results(
                 if model_name in model_scores:
                     avg = model_scores[model_name]
                     points = question_points.get(question_code, 1)
-                    final_score = (avg / 10) * points
 
                     f.write(f"Question {question_num} ({question_code}):\n")
-                    f.write(f"  Runs: Human Eval (avg: {avg:.1f}/10)\n")
-                    f.write(f"  Score: {final_score:.2f}/{points} (Human Eval)\n\n")
+                    f.write(f"  Runs: Human Eval (avg: {avg:.1f}/{points})\n")
+                    f.write(f"  Score: {avg:.2f}/{points} (Human Eval)\n\n")
                     question_num += 1
 
         f.write("=" * 80 + "\n")
@@ -324,6 +323,31 @@ def integrate_scores(session_dir: str) -> None:
         update_results_file(advanced_file, scores, question_points)
     else:
         logger.info("No advanced results file to update (this is normal for manual server runs)")
+    
+    # Generate HTML performance table if generation data is available
+    html_data = manifest.get("html_generation_data")
+    if html_data:
+        # Update all_results with human eval scores before generating HTML
+        all_results = html_data["all_results"]
+        questions_data = html_data["questions_data"]
+        
+        # Merge human eval scores into all_results
+        for question_code, model_scores in scores.items():
+            for model_name, avg in model_scores.items():
+                if question_code in all_results and model_name in all_results[question_code]:
+                    # Scores are absolute, use avg directly
+                    all_results[question_code][model_name]["score"] = avg
+        
+        # Generate HTML
+        from main import generate_performance_html
+        html_path = generate_performance_html(
+            html_data["models"],
+            html_data["question_codes"],
+            all_results,
+            questions_data,
+            html_data["timestamp"]
+        )
+        logger.info("Performance table generated: file://%s", html_path)
     
     logger.info("Score integration complete!")
 

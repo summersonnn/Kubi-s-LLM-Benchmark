@@ -151,7 +151,8 @@ class HumanEvaluator:
         model_name: str,
         question_code: str,
         run_index: int,
-        html_content: str
+        html_content: str,
+        max_points: int = 1
     ) -> str:
         """
         Saves an implementation with an anonymized filename.
@@ -180,7 +181,8 @@ class HumanEvaluator:
             "run_index": run_index,
             "filename": filename,
             "score": None,
-            "is_leetcode": is_leetcode
+            "is_leetcode": is_leetcode,
+            "max_points": max_points
         })
 
         logger.info("Saved implementation %s for %s (run %d)", impl_id, model_name, run_index)
@@ -231,6 +233,41 @@ class HumanEvaluator:
         
         manifest["results_file"] = results_path
         manifest["advanced_results_file"] = advanced_results_path
+        
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
+    def store_html_generation_data(
+        self,
+        models: list[str],
+        question_codes: list[str],
+        all_results: dict,
+        questions_data: dict,
+        timestamp: str
+    ) -> None:
+        """
+        Stores data required for HTML performance table generation.
+        This allows integrate_scores to generate the table after scoring is complete.
+        """
+        import json
+        
+        if not self.session_dir:
+            return
+        
+        manifest_path = os.path.join(self.session_dir, "manifest.json")
+        if not os.path.exists(manifest_path):
+            return
+        
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+        
+        manifest["html_generation_data"] = {
+            "models": models,
+            "question_codes": question_codes,
+            "all_results": all_results,
+            "questions_data": questions_data,
+            "timestamp": timestamp
+        }
         
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)

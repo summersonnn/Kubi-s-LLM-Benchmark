@@ -730,9 +730,9 @@ def run_benchmark() -> None:
     human_eval_server_spawned = False
 
     # ThreadPoolExecutor for parallel runs
-    # We want max parallelism, but let's limit to something reasonable like 16 threads
-    # (e.g. 4 models * 4 runs = 16 concurrent requests)
-    with ThreadPoolExecutor(max_workers=16) as executor:
+    # We want max parallelism, but let's limit to something reasonable like 28 threads
+    # (e.g. 7 models * 4 runs = 28 concurrent requests)
+    with ThreadPoolExecutor(max_workers=28) as executor:
         
         for code in sorted_question_codes:
             data = questions_data[code]
@@ -825,7 +825,8 @@ def run_benchmark() -> None:
                             model_name=model_name,
                             question_code=code,
                             run_index=run_idx,
-                            html_content=result.get("response", "")
+                            html_content=result.get("response", ""),
+                            max_points=points
                         )
                     
                 except Exception as e:
@@ -903,7 +904,7 @@ def run_benchmark() -> None:
                 
                 # Spawn subprocess detached from parent
                 script_dir = os.path.dirname(os.path.abspath(__file__))
-                server_script = os.path.join(script_dir, "human_eval_server.py")
+                server_script = os.path.join(script_dir, "utils", "human_eval_server.py")
                 
                 logger.info("Launching: %s %s", server_script, session_dir)
                 
@@ -948,6 +949,15 @@ def run_benchmark() -> None:
     if has_manual_checks:
         human_eval.update_results_paths(results_file_path, advanced_results_path)
         
+        # Store data needed for HTML generation (to be done after human eval completes)
+        human_eval.store_html_generation_data(
+            models=api.models,
+            question_codes=valid_question_codes,
+            all_results=all_results,
+            questions_data=questions_data,
+            timestamp=run_timestamp
+        )
+        
         # Check if human evaluation is already complete
         session_dir = human_eval.get_session_dir()
         manifest_path = os.path.join(session_dir, "manifest.json")
@@ -966,20 +976,28 @@ def run_benchmark() -> None:
             integrate_scores(session_dir)
             
             logger.info("Human evaluation scores integrated into results files.")
+            
+            # Generate HTML after integration (scores are now complete)
+            html_path = generate_performance_html(
+                api.models, valid_question_codes, all_results, questions_data, run_timestamp
+            )
+            logger.info(" Performance table generated: file://%s", html_path)
         else:
-            # Human eval still in progress
+            # Human eval still in progress - HTML will be generated after integration
             logger.info("\n" + "=" * 60)
             logger.info("HUMAN EVALUATION IN PROGRESS")
             logger.info("=" * 60)
             logger.info("Human evaluation server is running in the background.")
             logger.info("Session directory: %s", session_dir)
             logger.info("Complete scoring in the browser windows.")
-            logger.info("After scoring, run: uv run python -m utils.integrate_human_scores %s", session_dir)
-    
-    # Generate HTML performance table
-    html_path = generate_performance_html(api.models, valid_question_codes, all_results, questions_data, run_timestamp)
-    logger.info(" Performance table generated: file://%s", html_path)
-
+            logger.info("Scores will be auto-integrated upon completion.")
+            logger.info("Performance table will be generated after integration.")
+    else:
+        # No human eval questions - generate HTML immediately
+        html_path = generate_performance_html(
+            api.models, valid_question_codes, all_results, questions_data, run_timestamp
+        )
+        logger.info(" Performance table generated: file://%s", html_path)
 
     logger.info("=" * 60)
 

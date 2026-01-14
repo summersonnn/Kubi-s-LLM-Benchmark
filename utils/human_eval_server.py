@@ -316,8 +316,8 @@ EVALUATION_HTML = """
     <div class="modal-overlay" id="scoreModal">
         <div class="modal">
             <h2>Rate This Implementation</h2>
-            <input type="number" class="score-input" id="scoreInput" min="1" max="10" placeholder="1-10">
-            <p class="score-hint">Enter a score from 1 (poor) to 10 (excellent)</p>
+            <input type="number" class="score-input" id="scoreInput" min="0" max="10" step="any" placeholder="0-10">
+            <p class="score-hint" id="scoreHint">Enter a score from 0 to max points</p>
             <button class="btn" id="nextBtn">Next</button>
         </div>
     </div>
@@ -361,8 +361,17 @@ EVALUATION_HTML = """
             currentImpl = {
                 id: data.impl_id,
                 filename: data.filename,
-                is_leetcode: isLeetcode
+                is_leetcode: isLeetcode,
+                max_points: data.max_points || 1
             };
+            
+            // Update score input constraints based on max_points
+            const scoreInput = document.getElementById('scoreInput');
+            scoreInput.min = 0;
+            scoreInput.max = currentImpl.max_points;
+            scoreInput.placeholder = '0-' + currentImpl.max_points;
+            document.getElementById('scoreHint').textContent = 
+                'Enter a score from 0 to ' + currentImpl.max_points + ' (absolute points)';
             totalImpls = data.total;
             scoredCount = data.scored;
 
@@ -510,9 +519,10 @@ EVALUATION_HTML = """
         
         async function submitScore() {
             const input = document.getElementById('scoreInput');
-            const score = parseInt(input.value, 10);
+            const score = parseFloat(input.value);
             
-            if (isNaN(score) || score < 1 || score > 10) {
+            const maxPoints = currentImpl ? currentImpl.max_points : 10;
+            if (isNaN(score) || score < 0 || score > maxPoints) {
                 input.style.borderColor = '#ff4444';
                 return;
             }
@@ -610,6 +620,12 @@ EVALUATION_HTML = """
             if ((e.code === 'Enter' || e.code === 'NumpadEnter') && document.getElementById('scoreModal').classList.contains('active')) {
                 e.preventDefault();
                 submitScore();
+            }
+            
+            // Escape to close score modal without submitting
+            if (e.code === 'Escape' && document.getElementById('scoreModal').classList.contains('active')) {
+                e.preventDefault();
+                closeScoreModal();
             }
         }, true); // Use capture phase to get events before iframe
         
@@ -739,7 +755,8 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
                         "index": current_idx,
                         "total": total,
                         "scored": scored,
-                        "is_leetcode": is_leetcode
+                        "is_leetcode": is_leetcode,
+                        "max_points": impl.get("max_points", 1)
                     }
             
             self.send_response(200)
@@ -841,6 +858,13 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
     def _run_integration(self):
         """Runs the score integration after all implementations are scored."""
         try:
+            # Add parent directory to path for proper imports when running from utils/
+            import sys
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(script_dir)
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            
             from utils.integrate_human_scores import integrate_scores
             print("\n" + "=" * 60)
             print("ALL IMPLEMENTATIONS SCORED - INTEGRATING RESULTS")
@@ -900,6 +924,19 @@ def run_server(session_dir: str, port: int = 8765, num_parallel: int = 1, auto_i
         print(f"Opening evaluation window {i + 1}/{num_parallel}")
         webbrowser.open(base_url)
         time.sleep(0.3)
+
+    # Check if all scores are already collected (resume with completed evaluation)
+    manifest_path = os.path.join(session_dir, "manifest.json")
+    with open(manifest_path, "r") as f:
+        manifest = json.load(f)
+    
+    all_scored = all(impl.get("score") is not None for impl in manifest["implementations"])
+    if all_scored and auto_integrate and not EvaluationHandler.integration_done:
+        print("\nAll implementations already scored - triggering integration...")
+        EvaluationHandler.integration_done = True
+        # Create a dummy handler to call integration
+        dummy = EvaluationHandler.__new__(EvaluationHandler)
+        dummy._run_integration()
 
     try:
         # Keep main thread alive

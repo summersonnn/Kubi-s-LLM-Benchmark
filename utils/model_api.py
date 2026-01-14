@@ -105,7 +105,7 @@ class ModelAPI:
         extra_body = kwargs.pop("extra_body", {})
         if reasoning:
             if "reasoning" not in extra_body:
-                extra_body["reasoning"] = {"enabled": True}
+                extra_body["reasoning"] = {"effort": "high"}
         
         # Determine parameters to avoid duplicates in **kwargs
         max_tokens = kwargs.pop("max_tokens", self.max_tokens)
