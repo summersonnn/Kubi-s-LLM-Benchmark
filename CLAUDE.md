@@ -210,3 +210,5 @@ This will remove all contents from the above directories and recreate them fresh
 
 **Score integration fails**: Ensure all implementations are scored in web UI before running integration
 
+**Clear the port if the human eval server is not working**: Run fuser -k 8765/tcp
+
