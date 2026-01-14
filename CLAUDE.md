@@ -102,7 +102,7 @@ Point: [integer, default 1]
 4. Calculate scores: `points * (passes / total_runs)`
 5. Generate timestamped results files
 6. If human eval needed: spawn web server at `localhost:8765`
-7. Run `python integrate_human_scores.py <session_dir>` after scoring
+7. Run `python -m utils.integrate_human_scores <session_dir>` after scoring
 
 ## Common Commands
 
@@ -110,8 +110,11 @@ Point: [integer, default 1]
 # Run full benchmark
 python main.py
 
+# Run benchmark with history cleared first
+python main.py --delete_history
+
 # Integrate human scores after evaluation
-python integrate_human_scores.py manual_run_codes/<session_dir>
+python -m utils.integrate_human_scores manual_run_codes/<session_dir>
 
 # Type checking
 uv run mypy .
@@ -178,10 +181,24 @@ Dev dependencies: `mypy`, `ruff`, `pytest`
 
 ## Code Conventions
 
-- Use `utils.setup_logging()` for consistent log formatting
+- Use `utils.utils.setup_logging()` for consistent log formatting
 - Evaluators return `{success: bool, reasoning: str, verdict: str}`
 - Validity checkers return `tuple[bool, str]` (is_valid, failure_reason)
 - Question codes use format `A<N>` (e.g., A15, A48)
+
+## Managing History
+
+The framework maintains three directories for historical data:
+- `results/` - Summary benchmark results
+- `results_advanced/` - Detailed results with full model outputs
+- `manual_run_codes/` - Human evaluation session data
+
+To clear all history before running a new benchmark:
+```bash
+python main.py --delete_history
+```
+
+This will remove all contents from the above directories and recreate them fresh.
 
 ## Troubleshooting
 
@@ -192,3 +209,4 @@ Dev dependencies: `mypy`, `ruff`, `pytest`
 **Human eval server issues**: Check port 8765 is available, or kill existing process
 
 **Score integration fails**: Ensure all implementations are scored in web UI before running integration
+

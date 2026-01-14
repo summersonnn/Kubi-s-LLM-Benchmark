@@ -8,12 +8,13 @@ import glob
 import re
 import subprocess
 import sys
+import argparse
 from datetime import datetime
 from typing import Any, Dict, List
-from model_api import ModelAPI
+from utils.model_api import ModelAPI
 from openai import OpenAIError
-from utils import setup_logging, parse_question_file, kill_process_on_port
-from evaluators import JudgeLLMEvaluator, HumanEvaluator, ValidityEvaluator
+from utils.utils import setup_logging, parse_question_file, kill_process_on_port, clear_history
+from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, ValidityEvaluator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = setup_logging(__name__)
@@ -129,9 +130,13 @@ def write_advanced_results_file(
                 model_data = all_results.get(code, {}).get(model, {})
                 runs = model_data.get("runs", [])
                 score = model_data.get("score", 0.0)
+                total_tokens = model_data.get("total_tokens", 0)
+                total_cost = model_data.get("total_cost", 0.0)
                 
                 f.write(f"MODEL: {model}\n")
                 f.write(f"SCORE: {score:.2f}/{points:.2f}\n")
+                f.write(f"TOKENS USED: {total_tokens}\n")
+                f.write(f"COST INCURRED: ${total_cost:.6f}\n")
                 f.write("-" * 100 + "\n\n")
 
                 for run_idx, run_result in enumerate(runs, 1):
@@ -375,6 +380,13 @@ def process_single_run(
         message = response.choices[0].message
         content = message.content or ""
         reasoning_details = getattr(message, "reasoning_details", None)
+        
+        # Extract token usage and cost from response
+        completion_tokens = 0
+        cost = 0.0
+        if hasattr(response, 'usage') and response.usage:
+            completion_tokens = getattr(response.usage, 'completion_tokens', 0)
+            cost = getattr(response.usage, 'cost', 0.0)
 
         # Evaluation logic
         judge_reasoning = None
@@ -402,7 +414,9 @@ def process_single_run(
             "response": content,
             "model_reasoning": reasoning_details,
             "judge_reasoning": judge_reasoning,
-            "judge_verdict": judge_verdict
+            "judge_verdict": judge_verdict,
+            "completion_tokens": completion_tokens,
+            "cost": cost
         }
 
     except (OpenAIError, IndexError, Exception) as e:
@@ -417,20 +431,180 @@ def process_single_run(
         }
 
 
+
+
+def generate_performance_html(
+    models: List[str],
+    question_codes: List[str],
+    all_results: Dict[str, Dict[str, Any]],
+    questions_data: Dict[str, Dict[str, Any]],
+    timestamp: str
+) -> str:
+    """
+    Generates an HTML performance table and saves it to a file.
+    Returns the absolute path to the generated HTML file.
+    """
+    results_dir = "results"
+    os.makedirs(results_dir, exist_ok=True)
+    filename = f"performance_table_{timestamp}.html"
+    filepath = os.path.abspath(os.path.join(results_dir, filename))
+    
+    short_models = [m.split("/")[-1] for m in models]
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Benchmark Performance Summary - {timestamp}</title>
+        <style>
+            body {{ font-family: sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }}
+            h1 {{ text-align: center; color: #444; }}
+            .container {{ max-width: 100%; overflow-x: auto; box-shadow: 0 0 20px rgba(0,0,0,0.1); background-color: #fff; padding: 20px; border-radius: 8px; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
+            th, td {{ border: 1px solid #ddd; padding: 12px 15px; text-align: center; white-space: nowrap; }}
+            th {{ background-color: #009879; color: #ffffff; font-weight: bold; position: sticky; top: 0; }}
+            tr:nth-child(even) {{ background-color: #f3f3f3; }}
+            tr:hover {{ background-color: #f1f1f1; cursor: default; }}
+            .pass {{ color: #27ae60; font-weight: bold; background-color: #eafaf1; }}
+            .fail {{ color: #c0392b; font-weight: bold; background-color: #fdedec; }}
+            .score {{ color: #2c3e50; font-weight: bold; }}
+            .q-col {{ text-align: left; font-weight: bold; background-color: #f8f9fa; }}
+            .tokens {{ color: #3498db; font-size: 0.9em; }}
+            .cost {{ color: #e67e22; font-size: 0.9em; }}
+            .model-header {{ background-color: #006b5a !important; }}
+        </style>
+    </head>
+    <body>
+        <h1>Benchmark Performance Summary</h1>
+        <p style="text-align: center; color: #666;">Date: {timestamp}</p>
+        <div class="container">
+            <table>
+                <thead>
+                    <tr>
+                        <th rowspan="2">Question Index</th>
+                        <th rowspan="2">Points</th>
+    """
+    
+    # Add model headers (spanning 3 columns: Score, Tokens, Cost)
+    for model in short_models:
+        html_content += f"                        <th colspan='3' class='model-header'>{model}</th>\n"
+    
+    html_content += """                    </tr>
+                    <tr>
+    """
+    
+    # Add sub-headers for each model (Score, Tokens, Cost)
+    for _ in short_models:
+        html_content += "                        <th>Score</th>\n"
+        html_content += "                        <th>Tokens</th>\n"
+        html_content += "                        <th>Cost</th>\n"
+        
+    html_content += """                    </tr>
+                </thead>
+                <tbody>
+    """
+    
+    for q_id in question_codes:
+        q_data = questions_data.get(q_id, {})
+        points = q_data.get("points", 1)
+        
+        # Format points
+        if isinstance(points, float) and points.is_integer():
+            p_str = str(int(points))
+        else:
+            p_str = str(points)
+            
+        html_content += f"                    <tr>\n                        <td class='q-col'>{q_id}</td>\n                        <td>{p_str}</td>\n"
+        
+        for model in models:
+            model_results = all_results.get(q_id, {}).get(model, {})
+            score = model_results.get("score", 0.0)
+            total_tokens = model_results.get("total_tokens", 0)
+            total_cost = model_results.get("total_cost", 0.0)
+            
+            val_class = "score"
+            val_text = "FAIL"
+            
+            if score == points and score > 0:
+                val_text = "PASS"
+                val_class = "pass"
+            elif score == 0:
+                val_text = "FAIL"
+                val_class = "fail"
+            else:
+                if isinstance(score, float) and score.is_integer():
+                    val_text = str(int(score))
+                else:
+                    # Remove trailing zeros for cleanliness
+                    val_text = f"{score:.2f}".rstrip('0').rstrip('.')
+            
+            # Add score cell
+            html_content += f"                        <td class='{val_class}'>{val_text}</td>\n"
+            # Add tokens cell
+            html_content += f"                        <td class='tokens'>{total_tokens}</td>\n"
+            # Add cost cell
+            cost_str = f"${total_cost:.6f}".rstrip('0').rstrip('.')
+            if cost_str == "$":
+                cost_str = "$0"
+            html_content += f"                        <td class='cost'>{cost_str}</td>\n"
+            
+        html_content += "                    </tr>\n"
+        
+    html_content += """                </tbody>
+            </table>
+        </div>
+    </body>
+    </html>
+    """
+    
+    with open(filepath, "w") as f:
+        f.write(html_content)
+        
+    return filepath
+
+
+
 def run_benchmark() -> None:
     """
     Executes the benchmark for questions defined in questions.txt across all loaded models.
     """
-    questions_file = "questions.txt"
+    questions_file = "config/questions.txt"
     if not os.path.exists(questions_file):
         logger.error("questions.txt not found.")
         return
 
     with open(questions_file, "r") as f:
-        question_codes = [line.strip() for line in f if line.strip()]
+        raw_lines = [line.strip() for line in f if line.strip()]
+
+    if not raw_lines:
+        logger.error("No question codes found in questions.txt")
+        return
+
+    # Expand subfolder entries (lines ending with "/") to all questions in that subfolder
+    question_codes = []
+    for line in raw_lines:
+        if line.endswith("/"):
+            # Treat as subfolder path relative to questions directory
+            subfolder_path = os.path.join("questions", line.rstrip("/"))
+            if os.path.isdir(subfolder_path):
+                subfolder_files = glob.glob(os.path.join(subfolder_path, "*.txt"))
+                for fpath in subfolder_files:
+                    fname = os.path.basename(fpath)
+                    # Exclude known non-question files
+                    if fname in ["html_css_js_questions_prefix.txt", "readme.txt", "README.txt"]:
+                        continue
+                    code = os.path.splitext(fname)[0]
+                    question_codes.append(code)
+                logger.info("Expanded '%s' to %d questions.", line, len(subfolder_files))
+            else:
+                logger.warning("Subfolder '%s' not found, skipping.", subfolder_path)
+        else:
+            question_codes.append(line)
 
     if not question_codes:
-        logger.error("No question codes found in questions.txt")
+        logger.error("No question codes found after expansion")
         return
 
     try:
@@ -662,6 +836,10 @@ def run_benchmark() -> None:
             for model_name in api.models:
                 runs = all_results[code][model_name]["runs"]
                 
+                # Aggregate token usage and cost across all runs
+                total_tokens = sum(r.get("completion_tokens", 0) for r in runs)
+                total_cost = sum(r.get("cost", 0.0) for r in runs)
+                
                 # Check if this is a granular scoring question (parse SCORE:X/Y from reasoning)
                 total_run_score = 0.0
                 has_granular_scores = False
@@ -688,6 +866,8 @@ def run_benchmark() -> None:
                 # Average across all runs
                 score = total_run_score / NUM_RUNS if NUM_RUNS > 0 else 0
                 all_results[code][model_name]["score"] = score
+                all_results[code][model_name]["total_tokens"] = total_tokens
+                all_results[code][model_name]["total_cost"] = total_cost
                 
                 if has_granular_scores:
                     # Show detailed per-run scores
@@ -782,7 +962,7 @@ def run_benchmark() -> None:
             logger.info("INTEGRATING HUMAN EVALUATION SCORES")
             logger.info("=" * 60)
             
-            from integrate_human_scores import integrate_scores
+            from utils.integrate_human_scores import integrate_scores
             integrate_scores(session_dir)
             
             logger.info("Human evaluation scores integrated into results files.")
@@ -794,11 +974,34 @@ def run_benchmark() -> None:
             logger.info("Human evaluation server is running in the background.")
             logger.info("Session directory: %s", session_dir)
             logger.info("Complete scoring in the browser windows.")
-            logger.info("After scoring, run: uv run integrate_human_scores.py %s", session_dir)
+            logger.info("After scoring, run: uv run python -m utils.integrate_human_scores %s", session_dir)
     
+    # Generate HTML performance table
+    html_path = generate_performance_html(api.models, valid_question_codes, all_results, questions_data, run_timestamp)
+    logger.info(" Performance table generated: file://%s", html_path)
+
+
     logger.info("=" * 60)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Benchmark LLMs across diverse question sets"
+    )
+    parser.add_argument(
+        "--delete_history",
+        action="store_true",
+        help="Clear all previous benchmark results before running"
+    )
+
+    args = parser.parse_args()
+
+    if args.delete_history:
+        logger.info("=" * 60)
+        logger.info("CLEARING BENCHMARK HISTORY")
+        logger.info("=" * 60)
+        clear_history()
+        logger.info("=" * 60)
+
     run_benchmark()
 

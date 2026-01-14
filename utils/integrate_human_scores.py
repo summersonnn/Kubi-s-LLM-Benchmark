@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List
 
-from utils import setup_logging
+from utils.utils import setup_logging
 
 logger = setup_logging(__name__)
 
@@ -285,7 +285,7 @@ def integrate_scores(session_dir: str) -> None:
         if qc not in question_points:
             # Try to read from question file
             from main import resolve_question_path
-            from utils import parse_question_file
+            from utils.utils import parse_question_file
             
             path = resolve_question_path(qc)
             if path:

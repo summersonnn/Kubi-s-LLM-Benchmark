@@ -7,6 +7,8 @@ import logging
 import sys
 import re
 import subprocess
+import os
+import shutil
 from typing import Tuple, Optional
 
 def setup_logging(name: str | None = None) -> logging.Logger:
@@ -168,3 +170,29 @@ def kill_process_on_port(port: int) -> None:
                 time.sleep(0.5)
         except Exception:
             pass  # Best effort, suppress errors
+
+
+def clear_history() -> None:
+    """
+    Clears all benchmark history by removing contents of results/,
+    results_advanced/, and manual_run_codes/ directories.
+    """
+    logger = setup_logging(__name__)
+
+    directories_to_clear = [
+        "results",
+        "results_advanced",
+        "manual_run_codes"
+    ]
+
+    for dir_name in directories_to_clear:
+        if os.path.exists(dir_name):
+            try:
+                shutil.rmtree(dir_name)
+                os.makedirs(dir_name)
+                logger.info("Cleared directory: %s", dir_name)
+            except Exception as e:
+                logger.error("Failed to clear directory %s: %s", dir_name, e)
+        else:
+            os.makedirs(dir_name)
+            logger.info("Created directory: %s", dir_name)

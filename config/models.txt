@@ -1,10 +1,10 @@
 !minimax/minimax-m2.1:nitro
-!openai/gpt-oss-120b
+openai/gpt-oss-120b
 !z-ai/glm-4.7
 qwen/qwen3-coder-30b-a3b-instruct
 !nvidia/nemotron-3-nano-30b-a3b
 !google/gemini-3-flash-preview
-!meta-llama/llama-4-scout
+meta-llama/llama-4-scout
 !openai/gpt-5.2
 !anthropic/claude-opus-4.5
 !mistralai/mistral-large-2512

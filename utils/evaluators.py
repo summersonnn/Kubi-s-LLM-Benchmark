@@ -6,8 +6,8 @@ Includes JudgeLLMEvaluator for automated assessment and HumanEvaluator for manua
 import os
 from typing import Any, Dict, Protocol
 
-from model_api import ModelAPI
-from utils import setup_logging
+from utils.model_api import ModelAPI
+from utils.utils import setup_logging
 
 logger = setup_logging(__name__)
 
@@ -21,7 +21,7 @@ class JudgeLLMEvaluator:
     Evaluator that uses a separate LLM to judge the correctness of an answer.
     """
 
-    def __init__(self, judge_model_path: str = "judge_model.txt") -> None:
+    def __init__(self, judge_model_path: str = "config/judge_model.txt") -> None:
         """
         Initializes the judge evaluator by loading the judge model.
         """

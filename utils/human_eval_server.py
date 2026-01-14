@@ -841,7 +841,7 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
     def _run_integration(self):
         """Runs the score integration after all implementations are scored."""
         try:
-            from integrate_human_scores import integrate_scores
+            from utils.integrate_human_scores import integrate_scores
             print("\n" + "=" * 60)
             print("ALL IMPLEMENTATIONS SCORED - INTEGRATING RESULTS")
             print("=" * 60)

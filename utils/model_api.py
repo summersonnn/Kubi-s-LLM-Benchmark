@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from dotenv import load_dotenv
-from utils import setup_logging
+from utils.utils import setup_logging
 
 logger = setup_logging(__name__)
 
@@ -19,7 +19,7 @@ class ModelAPI:
     Configuration is loaded from environment variables and a models.txt file.
     """
 
-    def __init__(self, env_path: Optional[str] = None, models_path: str = "models.txt") -> None:
+    def __init__(self, env_path: Optional[str] = None, models_path: str = "config/models.txt") -> None:
         """
         Initializes the ModelAPI with configuration from environment variables
         and a list of models from a file.
