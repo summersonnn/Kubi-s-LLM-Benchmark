@@ -1,10 +1,10 @@
-!google/gemini-3-flash-preview:nitro
+!google/gemini-3-flash-preview
 !google/gemini-3-pro-preview
 !openai/gpt-5.2
 !openai/gpt-5.2-codex
 !openai/o3
 !openai/gpt-5-mini
-!anthropic/claude-opus-4.5@preset/fp8
+anthropic/claude-opus-4.5@preset/fp8
 !anthropic/claude-sonnet-4.5@preset/fp8
 !anthropic/claude-haiku-4.5
 !x-ai/grok-4
@@ -22,5 +22,5 @@
 !qwen/qwen3-coder@preset/fp8
 !qwen/qwen3-next-80b-a3b-thinking
 !qwen/qwen3-coder-30b-a3b-instruct@preset/fp8
-qwen/qwen3-32b
+!qwen/qwen3-32b
 !xiaomi/mimo-v2-flash

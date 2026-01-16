@@ -16,6 +16,7 @@ from utils.model_api import ModelAPI
 from openai import OpenAIError
 from utils.utils import setup_logging, parse_question_file, kill_process_on_port, clear_history
 from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, ValidityEvaluator
+from utils.cost_effective import find_model_folder, get_existing_implementations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Load environment variables
@@ -467,7 +468,8 @@ def generate_performance_html(
     filename = f"performance_table_{timestamp}.html"
     filepath = os.path.abspath(os.path.join(results_dir, filename))
     
-    short_models = [m.split("/")[-1] for m in models]
+    # Extract short model names - strip @preset/... suffix first, then take name after provider/
+    short_models = [m.split("@")[0].split("/")[-1] for m in models]
     
     html_content = f"""
     <!DOCTYPE html>
@@ -843,9 +845,57 @@ def run_benchmark() -> None:
             for i, model_name in enumerate(api.models):
                 all_results[code][model_name] = {"runs": [], "score": 0.0}
                 
-                logger.info("[*] Submitting %d runs for Model: %s...", NUM_RUNS, model_name)
+                # Check for cached implementations (human_eval questions only)
+                cached_impls = []
+                is_human_eval_question = questions_data[code].get("is_manual_check", False)
                 
-                for run_idx in range(NUM_RUNS):
+                if is_human_eval_question:
+                    model_folder = find_model_folder(model_name)
+                    if model_folder:
+                        cached_impls = get_existing_implementations(
+                            model_folder, code, NUM_RUNS
+                        )
+                
+                num_cached = len(cached_impls)
+                num_to_submit = NUM_RUNS - num_cached
+                
+                if num_cached > 0:
+                    logger.info(
+                        "[*] Model %s: Using %d cached + %d new runs for %s",
+                        model_name, num_cached, num_to_submit, code
+                    )
+                else:
+                    logger.info("[*] Submitting %d runs for Model: %s...", NUM_RUNS, model_name)
+                
+                # Process cached implementations first
+                for cached in cached_impls:
+                    cached_result = {
+                        "success": False,
+                        "response": cached["html_content"],
+                        "model_reasoning": None,
+                        "judge_reasoning": "Loaded from cost-effective cache",
+                        "judge_verdict": "Pending",
+                        "completion_tokens": 0,
+                        "cost": 0.0
+                    }
+                    all_results[code][model_name]["runs"].append(cached_result)
+                    
+                    # Save implementation for human eval
+                    human_eval.save_implementation(
+                        model_name=model_name,
+                        question_code=code,
+                        run_index=cached["run_index"] - 1,  # Convert 1-indexed to 0-indexed
+                        html_content=cached["html_content"],
+                        max_points=points
+                    )
+                    
+                    logger.info(
+                        "    [%s] Run (%d/%d): CACHED (from %s)",
+                        model_name, cached["run_index"], NUM_RUNS, cached["source_file"]
+                    )
+                
+                # Submit only the remaining runs needed
+                for run_idx in range(num_cached, NUM_RUNS):
                     future = executor.submit(
                         process_single_run,
                         api=api,
@@ -862,7 +912,8 @@ def run_benchmark() -> None:
                     futures_map[future] = (model_name, run_idx)
 
             # Collect results as they complete
-            completed_counts = {model: 0 for model in api.models}
+            # Initialize counts with cached implementations already processed
+            completed_counts = {model: len(all_results[code][model]["runs"]) for model in api.models}
             
             for future in as_completed(futures_map):
                 model_name, run_idx = futures_map[future]
