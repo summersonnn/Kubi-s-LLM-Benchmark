@@ -187,15 +187,21 @@ def write_advanced_results_file(
             f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
             f.write("#" * 100 + "\n\n")
             
-            # Calculate weighted scores (excluding human eval questions)
+            # Calculate weighted scores and usage (excluding human eval questions)
             scores = {}
+            usage = {} # {model: (tokens, cost)}
             total_possible_points = 0
             for model in models:
                 score = 0
+                tokens = 0
+                cost = 0.0
                 for code in non_human_eval_codes:
                     model_data = all_results.get(code, {}).get(model, {})
                     score += model_data.get("score", 0.0)
+                    tokens += model_data.get("total_tokens", 0)
+                    cost += model_data.get("total_cost", 0.0)
                 scores[model] = score
+                usage[model] = (tokens, cost)
             
             # Calculate total possible points (excluding human eval)
             for code in non_human_eval_codes:
@@ -206,7 +212,8 @@ def write_advanced_results_file(
             
             for rank, (model, score) in enumerate(ranked, 1):
                 percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
-                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%)\n")
+                tokens, cost = usage[model]
+                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}\n")
             
             f.write("\n" + "=" * 100 + "\n")
         
@@ -313,15 +320,21 @@ def write_results_file(
             f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
             f.write("=" * 80 + "\n\n")
             
-            # Calculate weighted scores (excluding human eval)
+            # Calculate weighted scores and usage (excluding human eval)
             scores = {}
+            usage = {} # {model: (tokens, cost)}
             total_possible_points = 0
             for model in models:
                 score = 0
+                tokens = 0
+                cost = 0.0
                 for code in non_human_eval_codes:
                     model_data = all_results.get(code, {}).get(model, {})
                     score += model_data.get("score", 0.0)
+                    tokens += model_data.get("total_tokens", 0)
+                    cost += model_data.get("total_cost", 0.0)
                 scores[model] = score
+                usage[model] = (tokens, cost)
             
             # Calculate total possible points (excluding human eval)
             for code in non_human_eval_codes:
@@ -332,7 +345,8 @@ def write_results_file(
             
             for rank, (model, score) in enumerate(ranked, 1):
                 percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
-                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%)\n")
+                tokens, cost = usage[model]
+                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}\n")
             
             f.write("\n" + "=" * 80 + "\n")
         
@@ -553,6 +567,47 @@ def generate_performance_html(
         html_content += "                    </tr>\n"
         
     html_content += """                </tbody>
+                <tfoot style="background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #009879;">
+                    <tr>
+                        <td colspan="2" style="text-align: right; padding-right: 20px;">TOTAL</td>
+    """
+    
+    for model in models:
+        total_model_score = 0.0
+        total_model_tokens = 0
+        total_model_cost = 0.0
+        total_possible_points = 0.0
+        
+        for q_id in question_codes:
+            q_data = questions_data.get(q_id, {})
+            total_possible_points += q_data.get("points", 1)
+            
+            model_results = all_results.get(q_id, {}).get(model, {})
+            total_model_score += model_results.get("score", 0.0)
+            total_model_tokens += model_results.get("total_tokens", 0)
+            total_model_cost += model_results.get("total_cost", 0.0)
+        
+        # Format score
+        if total_model_score.is_integer():
+            s_str = str(int(total_model_score))
+        else:
+            s_str = f"{total_model_score:.2f}".rstrip('0').rstrip('.')
+            
+        if total_possible_points.is_integer():
+            tp_str = str(int(total_possible_points))
+        else:
+            tp_str = str(total_possible_points)
+            
+        html_content += f"                        <td class='score'>{s_str}/{tp_str}</td>\n"
+        html_content += f"                        <td class='tokens'>{total_model_tokens}</td>\n"
+        
+        cost_str = f"${total_model_cost:.4f}".rstrip('0').rstrip('.')
+        if cost_str == "$":
+            cost_str = "$0"
+        html_content += f"                        <td class='cost'>{cost_str}</td>\n"
+
+    html_content += """                    </tr>
+                </tfoot>
             </table>
         </div>
     </body>
@@ -728,11 +783,16 @@ def run_benchmark() -> None:
 
     # Track whether subprocess has been spawned
     human_eval_server_spawned = False
+    
+    # Track exception for try/finally - ensures partial results are written on crash
+    benchmark_exception = None
+    processed_any_question = False
 
     # ThreadPoolExecutor for parallel runs
     # We want max parallelism, but let's limit to something reasonable like 28 threads
     # (e.g. 7 models * 4 runs = 28 concurrent requests)
-    with ThreadPoolExecutor(max_workers=28) as executor:
+    try:
+      with ThreadPoolExecutor(max_workers=28) as executor:
         
         for code in sorted_question_codes:
             data = questions_data[code]
@@ -885,6 +945,9 @@ def run_benchmark() -> None:
                     logger.info("Model: %-30s | Score: %.2f/%d (%d/%d PASS)", 
                                 model_name, score, points, success_count, NUM_RUNS)
             
+            # Mark that we have processable results (for partial writes on crash)
+            processed_any_question = True
+            
             # After last human eval question completes, finalize session and spawn server
             if (has_manual_checks 
                 and human_eval_codes 
@@ -920,37 +983,35 @@ def run_benchmark() -> None:
                 )
                 human_eval_server_spawned = True
 
-    # Write results files
-    logger.info("\n" + "=" * 60)
-    logger.info("GENERATING RESULTS FILES")
-    logger.info("=" * 60)
-    
-    results_file_path = write_results_file(
-        models=api.models,
-        question_codes=valid_question_codes,
-        all_results=all_results,
-        questions_data=questions_data,
-        timestamp=run_timestamp
-    )
+    except Exception as e:
+        benchmark_exception = e
+        logger.error("Benchmark crashed: %s", e)
+        logger.info("Attempting to save partial results...")
 
-    logger.info("[+] Results file written to: %s", results_file_path)
+    finally:
+        # Always attempt to write results if we processed any questions
+        if not processed_any_question:
+            logger.warning("No questions were processed. Skipping results file generation.")
+            if benchmark_exception:
+                raise benchmark_exception
+            return
 
-    advanced_results_path = write_advanced_results_file(
-        models=api.models,
-        question_codes=valid_question_codes,
-        all_results=all_results,
-        questions_data=questions_data,
-        timestamp=run_timestamp
-    )
-    
-    logger.info("[+] Advanced results file written to: %s", advanced_results_path)
-    
-    # Update manifest with results file paths so integrate_scores uses the correct files
-    if has_manual_checks:
-        human_eval.update_results_paths(results_file_path, advanced_results_path)
+        # Write results files
+        logger.info("\n" + "=" * 60)
+        logger.info("GENERATING RESULTS FILES")
+        logger.info("=" * 60)
         
-        # Store data needed for HTML generation (to be done after human eval completes)
-        human_eval.store_html_generation_data(
+        results_file_path = write_results_file(
+            models=api.models,
+            question_codes=valid_question_codes,
+            all_results=all_results,
+            questions_data=questions_data,
+            timestamp=run_timestamp
+        )
+
+        logger.info("[+] Results file written to: %s", results_file_path)
+
+        advanced_results_path = write_advanced_results_file(
             models=api.models,
             question_codes=valid_question_codes,
             all_results=all_results,
@@ -958,48 +1019,98 @@ def run_benchmark() -> None:
             timestamp=run_timestamp
         )
         
-        # Check if human evaluation is already complete
-        session_dir = human_eval.get_session_dir()
-        manifest_path = os.path.join(session_dir, "manifest.json")
+        logger.info("[+] Advanced results file written to: %s", advanced_results_path)
         
-        import json
-        with open(manifest_path, "r") as f:
-            manifest = json.load(f)
-        
-        if manifest.get("scores_collected", False):
-            # Human eval finished before benchmark - integrate now
-            logger.info("\n" + "=" * 60)
-            logger.info("INTEGRATING HUMAN EVALUATION SCORES")
-            logger.info("=" * 60)
+        # Update manifest with results file paths so integrate_scores uses the correct files
+        if has_manual_checks and not benchmark_exception:
+            human_eval.update_results_paths(results_file_path, advanced_results_path)
             
-            from utils.integrate_human_scores import integrate_scores
-            integrate_scores(session_dir)
+            # Store data needed for HTML generation (to be done after human eval completes)
+            human_eval.store_html_generation_data(
+                models=api.models,
+                question_codes=valid_question_codes,
+                all_results=all_results,
+                questions_data=questions_data,
+                timestamp=run_timestamp
+            )
             
-            logger.info("Human evaluation scores integrated into results files.")
+            # Check if human evaluation is already complete
+            session_dir = human_eval.get_session_dir()
+            manifest_path = os.path.join(session_dir, "manifest.json")
             
-            # Generate HTML after integration (scores are now complete)
+            import json
+            with open(manifest_path, "r") as f:
+                manifest = json.load(f)
+            
+            if manifest.get("scores_collected", False):
+                # Human eval finished before benchmark - integrate now
+                logger.info("\n" + "=" * 60)
+                logger.info("INTEGRATING HUMAN EVALUATION SCORES")
+                logger.info("=" * 60)
+                
+                from utils.integrate_human_scores import integrate_scores
+                integrate_scores(session_dir)
+                
+                logger.info("Human evaluation scores integrated into results files.")
+                
+                # Generate HTML after integration (scores are now complete)
+                html_path = generate_performance_html(
+                    api.models, valid_question_codes, all_results, questions_data, run_timestamp
+                )
+                logger.info(" Performance table generated: file://%s", html_path)
+            else:
+                # Human eval still in progress - HTML will be generated after integration
+                logger.info("\n" + "=" * 60)
+                logger.info("HUMAN EVALUATION IN PROGRESS")
+                logger.info("=" * 60)
+                logger.info("Human evaluation server is running in the background.")
+                logger.info("Session directory: %s", session_dir)
+                logger.info("Complete scoring in the browser windows.")
+                logger.info("Scores will be auto-integrated upon completion.")
+                logger.info("Performance table will be generated after integration.")
+        elif not has_manual_checks:
+            # No human eval questions - generate HTML immediately
             html_path = generate_performance_html(
                 api.models, valid_question_codes, all_results, questions_data, run_timestamp
             )
             logger.info(" Performance table generated: file://%s", html_path)
-        else:
-            # Human eval still in progress - HTML will be generated after integration
-            logger.info("\n" + "=" * 60)
-            logger.info("HUMAN EVALUATION IN PROGRESS")
-            logger.info("=" * 60)
-            logger.info("Human evaluation server is running in the background.")
-            logger.info("Session directory: %s", session_dir)
-            logger.info("Complete scoring in the browser windows.")
-            logger.info("Scores will be auto-integrated upon completion.")
-            logger.info("Performance table will be generated after integration.")
-    else:
-        # No human eval questions - generate HTML immediately
-        html_path = generate_performance_html(
-            api.models, valid_question_codes, all_results, questions_data, run_timestamp
-        )
-        logger.info(" Performance table generated: file://%s", html_path)
+        
+        # Log rankings to console at the very end
+        if non_human_eval_codes:
+            print("\n" + "#" * 60)
+            print("FINAL MODEL RANKINGS (Automated Evaluation)")
+            print("#" * 60)
+            
+            scores = {}
+            usage = {}
+            total_possible_points = 0
+            for model in api.models:
+                score = 0
+                tokens = 0
+                cost = 0.0
+                for code in non_human_eval_codes:
+                    model_data = all_results.get(code, {}).get(model, {})
+                    score += model_data.get("score", 0.0)
+                    tokens += model_data.get("total_tokens", 0)
+                    cost += model_data.get("total_cost", 0.0)
+                scores[model] = score
+                usage[model] = (tokens, cost)
+            
+            for code in non_human_eval_codes:
+                total_possible_points += questions_data.get(code, {}).get("points", 1)
+            
+            ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            for rank, (model, score) in enumerate(ranked, 1):
+                percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+                tokens, cost = usage[model]
+                print(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}")
+            print("#" * 60 + "\n")
 
-    logger.info("=" * 60)
+        logger.info("=" * 60)
+        
+        # Re-raise the exception after saving partial results (preserves original crash behavior)
+        if benchmark_exception:
+            raise benchmark_exception
 
 
 if __name__ == "__main__":
