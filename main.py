@@ -11,15 +11,19 @@ import sys
 import argparse
 from datetime import datetime
 from typing import Any, Dict, List
+from dotenv import load_dotenv
 from utils.model_api import ModelAPI
 from openai import OpenAIError
 from utils.utils import setup_logging, parse_question_file, kill_process_on_port, clear_history
 from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, ValidityEvaluator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Load environment variables
+load_dotenv()
+
 logger = setup_logging(__name__)
 
-NUM_RUNS = 4
+NUM_RUNS = int(os.getenv("NUM_RUNS", "4"))
 
 def resolve_question_path(question_code: str) -> str | None:
     """
@@ -789,10 +793,11 @@ def run_benchmark() -> None:
     processed_any_question = False
 
     # ThreadPoolExecutor for parallel runs
-    # We want max parallelism, but let's limit to something reasonable like 28 threads
-    # (e.g. 7 models * 4 runs = 28 concurrent requests)
+    # We want max parallelism, but let's limit to something reasonable
+    # (e.g. 7 models * 4 runs = 28 concurrent requests by default)
+    max_workers = int(os.getenv("MAX_WORKERS", "28"))
     try:
-      with ThreadPoolExecutor(max_workers=28) as executor:
+      with ThreadPoolExecutor(max_workers=max_workers) as executor:
         
         for code in sorted_question_codes:
             data = questions_data[code]
