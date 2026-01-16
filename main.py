@@ -25,6 +25,7 @@ load_dotenv()
 logger = setup_logging(__name__)
 
 NUM_RUNS = int(os.getenv("NUM_RUNS", "4"))
+COST_EFFECTIVE_ENABLED = os.getenv("COST_EFFECTIVE_ENABLED", "true").lower() in ("true", "1", "yes")
 
 def resolve_question_path(question_code: str) -> str | None:
     """
@@ -849,7 +850,7 @@ def run_benchmark() -> None:
                 cached_impls = []
                 is_human_eval_question = questions_data[code].get("is_manual_check", False)
                 
-                if is_human_eval_question:
+                if is_human_eval_question and COST_EFFECTIVE_ENABLED:
                     model_folder = find_model_folder(model_name)
                     if model_folder:
                         cached_impls = get_existing_implementations(
