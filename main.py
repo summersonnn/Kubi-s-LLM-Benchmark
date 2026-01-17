@@ -850,7 +850,7 @@ def run_benchmark() -> None:
                 cached_impls = []
                 is_human_eval_question = questions_data[code].get("is_manual_check", False)
                 
-                if is_human_eval_question and COST_EFFECTIVE_ENABLED:
+                if COST_EFFECTIVE_ENABLED:
                     model_folder = find_model_folder(model_name)
                     if model_folder:
                         cached_impls = get_existing_implementations(
@@ -870,29 +870,58 @@ def run_benchmark() -> None:
                 
                 # Process cached implementations first
                 for cached in cached_impls:
+                    content = cached["content"]
+                    is_manual = questions_data[code].get("is_manual_check", False)
+                    
+                    if is_manual:
+                        judge_reasoning = "Loaded from cost-effective cache"
+                        judge_verdict = "Pending"
+                        is_successful = False
+                        
+                        # Save implementation for human eval
+                        human_eval.save_implementation(
+                            model_name=model_name,
+                            question_code=code,
+                            run_index=cached["run_index"] - 1,  # Convert 1-indexed to 0-indexed
+                            html_content=content,
+                            max_points=points
+                        )
+                        status_log = "PENDING (Human Eval)"
+                    else:
+                        # Run evaluation on cached content
+                        if gt_for_run:
+                            if gt_for_run.upper().strip() == "VALIDITY CHECK":
+                                eval_result = validity_eval.evaluate(code, question, content)
+                                is_successful = eval_result["success"]
+                                judge_reasoning = f"{eval_result['reasoning']} (Cached)"
+                                judge_verdict = eval_result["verdict"]
+                            else:
+                                eval_result = judge.evaluate(question, gt_for_run, content)
+                                is_successful = eval_result["success"]
+                                judge_reasoning = f"{eval_result['reasoning']} (Cached)"
+                                judge_verdict = eval_result["verdict"]
+                        else:
+                            # Should not happen unless config is weird
+                            is_successful = False
+                            judge_reasoning = "No Ground Truth - Cached"
+                            judge_verdict = "Unknown"
+                            
+                        status_log = "PASS" if is_successful else "FAIL"
+
                     cached_result = {
-                        "success": False,
-                        "response": cached["html_content"],
+                        "success": is_successful,
+                        "response": content,
                         "model_reasoning": None,
-                        "judge_reasoning": "Loaded from cost-effective cache",
-                        "judge_verdict": "Pending",
+                        "judge_reasoning": judge_reasoning,
+                        "judge_verdict": judge_verdict,
                         "completion_tokens": 0,
                         "cost": 0.0
                     }
                     all_results[code][model_name]["runs"].append(cached_result)
                     
-                    # Save implementation for human eval
-                    human_eval.save_implementation(
-                        model_name=model_name,
-                        question_code=code,
-                        run_index=cached["run_index"] - 1,  # Convert 1-indexed to 0-indexed
-                        html_content=cached["html_content"],
-                        max_points=points
-                    )
-                    
                     logger.info(
-                        "    [%s] Run (%d/%d): CACHED (from %s)",
-                        model_name, cached["run_index"], NUM_RUNS, cached["source_file"]
+                        "    [%s] Run (%d/%d): CACHED (from %s) - %s",
+                        model_name, cached["run_index"], NUM_RUNS, cached["source_file"], status_log
                     )
                 
                 # Submit only the remaining runs needed

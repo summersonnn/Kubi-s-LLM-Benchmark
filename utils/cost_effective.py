@@ -14,6 +14,23 @@ logger = setup_logging(__name__)
 COST_EFFECTIVE_DIR = "cost-effective"
 
 
+def extract_base_question_code(question_code: str) -> str:
+    """
+    Extracts the base question code (e.g., 'A17' or 'A23.1') from a full question code
+    that may include descriptive suffixes (e.g., 'A17-line-liars' or 'A23.1-some-name').
+    
+    Args:
+        question_code: Full question code potentially with suffix
+        
+    Returns:
+        Base question code (A<number> or A<number>.<subnumber>), or original if no match.
+    """
+    match = re.match(r"^(A\d+(?:\.\d+)?)", question_code, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return question_code
+
+
 def find_model_folder(model_name: str) -> str | None:
     """
     Finds a matching subfolder in cost-effective/ for the given model name.
@@ -42,14 +59,16 @@ def find_model_folder(model_name: str) -> str | None:
     return None
 
 
+
 def get_existing_implementations(
     model_folder: str,
     question_code: str,
     num_runs_needed: int
 ) -> list[dict[str, Any]]:
     """
-    Retrieves existing HTML implementations for a question from the cache folder.
-    Files must follow the pattern: {question_code}-{run_index}.html (e.g., A43-1.html)
+    Retrieves existing implementations for a question from the cache folder.
+    Files must follow the pattern: {question_code}-{run_index}.{ext} (e.g., A43-1.html, A68-1.txt)
+    Supported extensions: .html, .txt, .md
     
     Args:
         model_folder: Path to the model's cache folder
@@ -57,14 +76,17 @@ def get_existing_implementations(
         num_runs_needed: Maximum number of implementations to return
         
     Returns:
-        List of dicts with 'run_index' and 'html_content', ordered by run_index.
+        List of dicts with 'run_index' and 'content', ordered by run_index.
         Returns at most num_runs_needed items starting from run index 1.
     """
     if not os.path.isdir(model_folder):
         return []
     
-    # Pattern: QuestionCode-RunIndex.html (1-indexed)
-    pattern = re.compile(rf"^{re.escape(question_code)}-(\d+)\.html$", re.IGNORECASE)
+    # Extract base question code (e.g., 'A17' from 'A17-line-liars')
+    base_code = extract_base_question_code(question_code)
+    
+    # Pattern: QuestionCode-RunIndex.(html|txt|md) (1-indexed)
+    pattern = re.compile(rf"^{re.escape(base_code)}-(\d+)\.(html|txt|md)$", re.IGNORECASE)
     
     implementations = []
     
@@ -76,11 +98,11 @@ def get_existing_implementations(
             
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
-                    html_content = f.read()
+                    content = f.read()
                 
                 implementations.append({
                     "run_index": run_index,
-                    "html_content": html_content,
+                    "content": content,
                     "source_file": filepath
                 })
             except OSError as e:

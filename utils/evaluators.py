@@ -6,6 +6,7 @@ Includes JudgeLLMEvaluator for automated assessment and HumanEvaluator for manua
 import os
 from typing import Any, Dict, Protocol
 
+from utils.cost_effective import extract_base_question_code
 from utils.model_api import ModelAPI
 from utils.utils import setup_logging
 
@@ -329,8 +330,11 @@ class ValidityEvaluator:
         """
         import glob
         
-        # Look for a checker file that starts with the question code
-        pattern = os.path.join(self.checkers_dir, f"{question_code}_*.py")
+        # Extract base code (e.g., 'A58' from 'A58-BattleShip')
+        base_code = extract_base_question_code(question_code)
+        
+        # Look for a checker file that starts with the base question code
+        pattern = os.path.join(self.checkers_dir, f"{base_code}_*.py")
         matches = glob.glob(pattern)
         
         if not matches:
