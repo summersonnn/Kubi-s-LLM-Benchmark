@@ -36,9 +36,9 @@ python main.py
          ┌──────────────────┼──────────────────┐
          ▼                  ▼                  ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│ JudgeLLMEval    │  │ ValidityEval    │  │ HumanEvaluator  │
-│ (LLM compares   │  │ (Custom checker │  │ (Blind web UI   │
-│  answer to GT)  │  │  modules)       │  │  scoring 1-10)  │
+│ JudgeLLMEval    │  │ VerifierEval    │  │ HumanEvaluator  │
+│ (LLM compares   │  │ (Custom verifier │  │ (Blind web UI   │
+│  answer to GT)  │  │  scripts)       │  │  scoring 1-10)  │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
@@ -48,7 +48,7 @@ python main.py
 |------|---------|
 | `main.py` | Entry point, orchestrates benchmarking pipeline |
 | `model_api.py` | OpenRouter API wrapper, model configuration |
-| `evaluators.py` | Three evaluation strategies (Judge LLM, Validity, Human) |
+| `evaluators.py` | Three evaluation strategies (Judge LLM, Verifier, Human) |
 | `utils.py` | Shared utilities (logging, question file parsing) |
 | `human_eval_server.py` | HTTP server for blind human evaluation |
 | `integrate_human_scores.py` | Post-benchmark score integration |
@@ -71,9 +71,9 @@ questions/
 ├── math/               # Mathematical problems
 ├── reasoning/          # Complex logic & analysis
 ├── science/            # Biology, chemistry, physics
-└── manual_checks/      # HTML/CSS/JS implementations (human eval)
+└── coding/             # HTML/CSS/JS implementations (human eval)
 
-validity_checkers/      # Custom validation modules for VALIDITY CHECK questions
+verifier_scripts/      # Custom verification scripts for VALIDITY CHECK questions
 results/                # Standard benchmark results
 results_advanced/       # Detailed results with full model outputs
 manual_run_codes/       # Human evaluation session data
@@ -89,10 +89,10 @@ Ground Truth: [answer | "VALIDITY CHECK" | empty for human eval]
 Point: [integer, default 1]
 ```
 
-**Evaluation type is determined by Ground Truth:**
-- Specific answer → JudgeLLMEvaluator
-- `VALIDITY CHECK` → ValidityEvaluator (uses `validity_checkers/<code>_checker.py`)
-- Empty/missing → HumanEvaluator (blind scoring 1-10)
+**Evaluation type is determined by the filename:**
+- `-V-` in filename → VerifierEvaluator (uses `verifier_scripts/<code>_verifier.py`)
+- `-H-` in filename → HumanEvaluator (blind scoring 1-10)
+- `-J-` in filename → JudgeLLMEvaluator (uses `Ground Truth` for comparison)
 
 ## Benchmarking Flow
 
@@ -125,9 +125,9 @@ uv run ruff check .
 
 ## Adding New Questions
 
-1. Create `questions/<category>/A<N>-<name>.txt` with question format
+1. Create `questions/<category>/A<N>-V-<name>.txt` with question format (use `-V-` for verifier questions, `-H-` for human eval)
 2. Add question code to `questions.txt`
-3. For VALIDITY CHECK questions, create `validity_checkers/A<N>_<name>_checker.py`:
+3. For VALIDITY CHECK questions, create `verifier_scripts/A<N>_<name>_verifier.py`:
 
 ```python
 def check_validity(model_answer: str) -> tuple[bool, str]:
@@ -183,8 +183,9 @@ Dev dependencies: `mypy`, `ruff`, `pytest`
 
 - Use `utils.utils.setup_logging()` for consistent log formatting
 - Evaluators return `{success: bool, reasoning: str, verdict: str}`
-- Validity checkers return `tuple[bool, str]` (is_valid, failure_reason)
+- Verifier scripts return `tuple[bool, str]` (is_valid, failure_reason)
 - Question codes use format `A<N>` (e.g., A15, A48)
+- Filenames use `A<N>-V-<name>.txt` for verifiers and `A<N>-H-<name>.txt` for human eval
 
 ## Managing History
 

@@ -314,70 +314,70 @@ class HumanEvaluator:
         """
         return False
 
-class ValidityEvaluator:
+class VerifierEvaluator:
     """
     Evaluator that uses hardcoded logic to check if the answer adheres to specific rules.
     Used when Ground Truth is set to 'VALIDITY CHECK'.
     """
     def __init__(self) -> None:
-        """Initialize the ValidityEvaluator."""
-        self.checkers_dir = "validity_checkers"
+        """Initialize the VerifierEvaluator."""
+        self.verifiers_dir = "verifier_scripts"
     
-    def _get_checker_module_name(self, question_code: str) -> str | None:
+    def _get_verifier_module_name(self, question_code: str) -> str | None:
         """
-        Maps question code to the corresponding checker module name.
-        E.g., 'A15' -> 'A15_longest_word_checker'
+        Maps question code to the corresponding verifier module name.
+        E.g., 'A15' -> 'A15_longest_word_verifier'
         """
         import glob
         
         # Extract base code (e.g., 'A58' from 'A58-BattleShip')
         base_code = extract_base_question_code(question_code)
         
-        # Look for a checker file that starts with the base question code
-        pattern = os.path.join(self.checkers_dir, f"{base_code}_*.py")
+        # Look for a verifier file that starts with the base question code
+        pattern = os.path.join(self.verifiers_dir, f"{base_code}_*.py")
         matches = glob.glob(pattern)
         
         if not matches:
             return None
         
         # Return the module name (filename without .py)
-        checker_path = matches[0]
-        module_name = os.path.splitext(os.path.basename(checker_path))[0]
+        verifier_path = matches[0]
+        module_name = os.path.splitext(os.path.basename(verifier_path))[0]
         return module_name
     
     def evaluate(self, question_code: str, question_text: str, answer: str) -> dict[str, Any]:
         """
         Evaluates the answer based on hardcoded rules for the given question code.
-        Dynamically imports the appropriate validity checker and invokes it.
+        Dynamically imports the appropriate verifier script and invokes it.
         """
-        logger.info("[*] ValidityEvaluator: Evaluating question %s", question_code)
+        logger.info("[*] VerifierEvaluator: Evaluating question %s", question_code)
         
-        # Find the appropriate checker module
-        module_name = self._get_checker_module_name(question_code)
+        # Find the appropriate verifier module
+        module_name = self._get_verifier_module_name(question_code)
         
         if not module_name:
-            logger.warning("No validity checker found for question code: %s", question_code)
+            logger.warning("No verifier script found for question code: %s", question_code)
             return {
                 "success": False,
-                "reasoning": f"No validity checker implemented for question {question_code}",
+                "reasoning": f"No verifier script implemented for question {question_code}",
                 "verdict": "Error"
             }
         
         try:
-            # Dynamically import the checker module
+            # Dynamically import the verifier module
             import importlib
-            checker_module = importlib.import_module(f"{self.checkers_dir}.{module_name}")
+            verifier_module = importlib.import_module(f"{self.verifiers_dir}.{module_name}")
             
             # Call the check_validity function
-            if not hasattr(checker_module, "check_validity"):
-                logger.error("Checker module %s does not have check_validity function", module_name)
+            if not hasattr(verifier_module, "check_validity"):
+                logger.error("Verifier module %s does not have check_validity function", module_name)
                 return {
                     "success": False,
-                    "reasoning": f"Invalid checker module: missing check_validity function",
+                    "reasoning": f"Invalid verifier module: missing check_validity function",
                     "verdict": "Error"
                 }
             
-            is_valid, failure_reason = checker_module.check_validity(answer)
+            is_valid, failure_reason = verifier_module.check_validity(answer)
             
             if is_valid:
                 return {
@@ -393,9 +393,9 @@ class ValidityEvaluator:
                 }
         
         except Exception as e:
-            logger.error("Error executing validity checker for %s: %s", question_code, e)
+            logger.error("Error executing verifier script for %s: %s", question_code, e)
             return {
                 "success": False,
-                "reasoning": f"Error during validity check: {str(e)}",
+                "reasoning": f"Error during verification: {str(e)}",
                 "verdict": "Error"
             }

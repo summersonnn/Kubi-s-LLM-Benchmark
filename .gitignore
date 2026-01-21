@@ -15,7 +15,7 @@ wheels/
 results/
 results_advanced/
 questions/
-validity_checkers/
+verifier_scripts/
 manual_run_codes/
 media/
 cost-effective/

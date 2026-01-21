@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from utils.model_api import ModelAPI
 from openai import OpenAIError
 from utils.utils import setup_logging, parse_question_file, kill_process_on_port, clear_history
-from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, ValidityEvaluator
+from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, VerifierEvaluator
 from utils.cost_effective import find_model_folder, get_existing_implementations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -383,8 +383,9 @@ def process_single_run(
     ground_truth: str,
     points: int,
     judge: JudgeLLMEvaluator,
-    validity_eval: ValidityEvaluator,
-    human_eval: HumanEvaluator
+    verifier_eval: VerifierEvaluator,
+    human_eval: HumanEvaluator,
+    is_verifier_eval: bool = False
 ) -> Dict[str, Any]:
     """
     Executes a single run for a model on a question and returns the result.
@@ -412,17 +413,16 @@ def process_single_run(
         judge_reasoning = None
         judge_verdict = None
 
-        if ground_truth:
-            if ground_truth.upper().strip() == "VALIDITY CHECK":
-                eval_result = validity_eval.evaluate(question_code, question, content)
-                is_successful = eval_result["success"]
-                judge_reasoning = eval_result["reasoning"]
-                judge_verdict = eval_result["verdict"]
-            else:
-                eval_result = judge.evaluate(question, ground_truth, content)
-                is_successful = eval_result["success"]
-                judge_reasoning = eval_result["reasoning"]
-                judge_verdict = eval_result["verdict"]
+        if is_verifier_eval:
+            eval_result = verifier_eval.evaluate(question_code, question, content)
+            is_successful = eval_result["success"]
+            judge_reasoning = eval_result["reasoning"]
+            judge_verdict = eval_result["verdict"]
+        elif ground_truth:
+            eval_result = judge.evaluate(question, ground_truth, content)
+            is_successful = eval_result["success"]
+            judge_reasoning = eval_result["reasoning"]
+            judge_verdict = eval_result["verdict"]
         else:
             human_eval.evaluate(question, content)
             is_successful = False
@@ -673,7 +673,7 @@ def run_benchmark() -> None:
         api = ModelAPI()
         judge = JudgeLLMEvaluator()
         human_eval = HumanEvaluator()
-        validity_eval = ValidityEvaluator()
+        verifier_eval = VerifierEvaluator()
     except (ValueError, Exception) as e:
         logger.error("Failed to initialize system: %s", e)
         return
@@ -739,17 +739,23 @@ def run_benchmark() -> None:
 
         question, ground_truth, points = parse_question_file(file_content)
 
-        # Prepend prefix if question is in manual_checks directory (except Leetcode questions)
-        is_leetcode = "Leetcode" in os.path.basename(question_path)
-        if "manual_checks" in question_path and not is_leetcode:
+        # Prepend prefix if question requires human eval (except Leetcode questions)
+        question_basename = os.path.basename(question_path)
+        is_human_eval = "-H-" in question_basename
+        is_verifier_eval = "-V-" in question_basename
+        is_leetcode = "Leetcode" in question_basename
+        if is_human_eval and not is_leetcode:
             question = f"{prefix}\n\n{question}"
 
         # Determine Evaluation Type
-        if not ground_truth:
+        if is_human_eval:
             eval_type = "eval by HumanEval"
-        elif ground_truth.upper().strip() == "VALIDITY CHECK":
-            eval_type = "eval by hardcoded validity checks"
+        elif is_verifier_eval:
+            eval_type = "eval by verifier scripts"
+        elif "-J-" in question_basename:
+            eval_type = "eval by Judge LLM"
         else:
+            # Fallback for questions not yet renamed or special cases
             eval_type = "eval by Judge LLM"
 
         questions_data[code] = {
@@ -757,7 +763,8 @@ def run_benchmark() -> None:
             "ground_truth": ground_truth if ground_truth else "N/A",
             "points": points,
             "eval_type": eval_type,
-            "is_manual_check": "manual_checks" in question_path
+            "is_manual_check": is_human_eval,
+            "is_verifier_eval": is_verifier_eval
         }
         all_results[code] = {}
         valid_question_codes.append(code)
@@ -887,26 +894,26 @@ def run_benchmark() -> None:
                             max_points=points
                         )
                         status_log = "PENDING (Human Eval)"
-                    else:
+                    elif questions_data[code].get("is_verifier_eval", False):
                         # Run evaluation on cached content
-                        if gt_for_run:
-                            if gt_for_run.upper().strip() == "VALIDITY CHECK":
-                                eval_result = validity_eval.evaluate(code, question, content)
-                                is_successful = eval_result["success"]
-                                judge_reasoning = f"{eval_result['reasoning']} (Cached)"
-                                judge_verdict = eval_result["verdict"]
-                            else:
-                                eval_result = judge.evaluate(question, gt_for_run, content)
-                                is_successful = eval_result["success"]
-                                judge_reasoning = f"{eval_result['reasoning']} (Cached)"
-                                judge_verdict = eval_result["verdict"]
-                        else:
-                            # Should not happen unless config is weird
-                            is_successful = False
-                            judge_reasoning = "No Ground Truth - Cached"
-                            judge_verdict = "Unknown"
-                            
+                        eval_result = verifier_eval.evaluate(code, question, content)
+                        is_successful = eval_result["success"]
+                        judge_reasoning = f"{eval_result['reasoning']} (Cached)"
+                        judge_verdict = eval_result["verdict"]
                         status_log = "PASS" if is_successful else "FAIL"
+                    elif gt_for_run:
+                        # Run evaluation on cached content
+                        eval_result = judge.evaluate(question, gt_for_run, content)
+                        is_successful = eval_result["success"]
+                        judge_reasoning = f"{eval_result['reasoning']} (Cached)"
+                        judge_verdict = eval_result["verdict"]
+                        status_log = "PASS" if is_successful else "FAIL"
+                    else:
+                        # Should not happen unless config is weird
+                        is_successful = False
+                        judge_reasoning = "No Ground Truth - Cached"
+                        judge_verdict = "Unknown"
+                        status_log = "FAIL"
 
                     cached_result = {
                         "success": is_successful,
@@ -936,8 +943,9 @@ def run_benchmark() -> None:
                         ground_truth=gt_for_run,
                         points=points,
                         judge=judge,
-                        validity_eval=validity_eval,
-                        human_eval=human_eval
+                        verifier_eval=verifier_eval,
+                        human_eval=human_eval,
+                        is_verifier_eval=questions_data[code].get("is_verifier_eval", False)
                     )
                     futures_map[future] = (model_name, run_idx)
 

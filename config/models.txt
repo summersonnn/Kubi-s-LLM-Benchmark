@@ -4,7 +4,7 @@
 !openai/gpt-5.2-codex
 !openai/o3
 !openai/gpt-5-mini
-anthropic/claude-opus-4.5
+!anthropic/claude-opus-4.5
 !anthropic/claude-sonnet-4.5
 !anthropic/claude-haiku-4.5
 !x-ai/grok-4
@@ -13,9 +13,10 @@ anthropic/claude-opus-4.5
 !minimax/minimax-m2.1@preset/fp8
 !openai/gpt-oss-120b
 !z-ai/glm-4.7@preset/fp8-speedy
+!z-ai/glm-4.7-flash@preset/fp8-speedy
 !nvidia/nemotron-3-nano-30b-a3b@preset/fp8
 !meta-llama/llama-4-scout@preset/fp8
-!mistralai/mistral-large-2512@preset/fp8
+!mistralai/mistral-large-2512
 !deepseek/deepseek-v3.2@preset/fp8
 !qwen/qwen3-235b-a22b-thinking-2507@preset/fp8
 !qwen/qwen3-max
@@ -24,3 +25,5 @@ anthropic/claude-opus-4.5
 !qwen/qwen3-coder-30b-a3b-instruct@preset/fp8
 !qwen/qwen3-32b
 !xiaomi/mimo-v2-flash
+!google/gemma-3-27b-it
+mistralai/devstral-2512:free
