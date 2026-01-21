@@ -49,12 +49,13 @@ class JudgeLLMEvaluator:
         prompt = self._build_judge_prompt(question, ground_truth, answer)
         
         try:
-            # We bypass the index-based approach for the judge
-            response = self.api.client.chat.completions.create(
-                model=self.judge_model_name,
-                messages=[{"role": "user", "content": prompt}],
+            response = self.api.call(
+                prompt=prompt,
+                model_name=self.judge_model_name,
                 max_tokens=1024,
                 temperature=0.0,
+                timeout=60.0,
+                reasoning=False # Reasoning not needed for judge extraction
             )
             result_text = (response.choices[0].message.content or "").strip()
             
@@ -373,7 +374,7 @@ class VerifierEvaluator:
                 logger.error("Verifier module %s does not have check_validity function", module_name)
                 return {
                     "success": False,
-                    "reasoning": f"Invalid verifier module: missing check_validity function",
+                    "reasoning": "Invalid verifier module: missing check_validity function",
                     "verdict": "Error"
                 }
             

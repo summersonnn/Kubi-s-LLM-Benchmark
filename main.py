@@ -5,7 +5,6 @@ Parses question files, calls models via ModelAPI, and generates reports.
 
 import os
 import glob
-import re
 import subprocess
 import sys
 import argparse
@@ -299,8 +298,8 @@ def write_results_file(
                 f.write(f"  Expected: {expected}\n")
                 
                 if is_human_eval:
-                    f.write(f"  Score: PENDING (Human Eval)\n")
-                    f.write(f"  Runs: PENDING\n\n")
+                    f.write("  Score: PENDING (Human Eval)\n")
+                    f.write("  Runs: PENDING\n\n")
                 else:
                     f.write(f"  Score: {score:.2f}/{points}\n")
                     # List brief verdict for each run (with granular scores if available)
@@ -806,9 +805,8 @@ def run_benchmark() -> None:
     # We want max parallelism, but let's limit to something reasonable
     # (e.g. 7 models * 4 runs = 28 concurrent requests by default)
     max_workers = int(os.getenv("MAX_WORKERS", "28"))
+    executor = ThreadPoolExecutor(max_workers=max_workers)
     try:
-      with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        
         for code in sorted_question_codes:
             data = questions_data[code]
             question = data["question"]
@@ -855,7 +853,6 @@ def run_benchmark() -> None:
                 
                 # Check for cached implementations (human_eval questions only)
                 cached_impls = []
-                is_human_eval_question = questions_data[code].get("is_manual_check", False)
                 
                 if COST_EFFECTIVE_ENABLED:
                     model_folder = find_model_folder(model_name)
@@ -953,38 +950,48 @@ def run_benchmark() -> None:
             # Initialize counts with cached implementations already processed
             completed_counts = {model: len(all_results[code][model]["runs"]) for model in api.models}
             
-            for future in as_completed(futures_map):
-                model_name, run_idx = futures_map[future]
-                try:
-                    result = future.result()
-                    all_results[code][model_name]["runs"].append(result)
+            # Use a safety timeout on as_completed (API timeout + 60s buffer)
+            try:
+                for future in as_completed(futures_map, timeout=api.timeout + 60):
+                    model_name, run_idx = futures_map[future]
+                    try:
+                        result = future.result()
+                        all_results[code][model_name]["runs"].append(result)
+                        
+                        completed_counts[model_name] += 1
+                        
+                        # Extract detailed info from judge_reasoning if available
+                        judge_info = result.get("judge_reasoning", "")
+                        if result.get("judge_verdict") == "Pending":
+                            status = "PENDING"
+                        elif result["success"]:
+                            status = f"PASS - {judge_info}" if judge_info else "PASS"
+                        else:
+                            status = f"FAIL - {judge_info}" if judge_info else "FAIL"
+                        
+                        logger.info("    [%s] Run (%d/%d): %s", 
+                                    model_name, completed_counts[model_name], NUM_RUNS, status)
+                        
+                        # Save implementation for manual check questions
+                        if questions_data[code].get("is_manual_check", False):
+                            human_eval.save_implementation(
+                                model_name=model_name,
+                                question_code=code,
+                                run_index=run_idx,
+                                html_content=result.get("response", ""),
+                                max_points=points
+                            )
+                        
+                    except Exception as e:
+                        logger.error("Error collecting future for %s run %d: %s", model_name, run_idx, e)
                     
-                    completed_counts[model_name] += 1
-                    
-                    # Extract detailed info from judge_reasoning if available
-                    judge_info = result.get("judge_reasoning", "")
-                    if result.get("judge_verdict") == "Pending":
-                        status = "PENDING"
-                    elif result["success"]:
-                        status = f"PASS - {judge_info}" if judge_info else "PASS"
-                    else:
-                        status = f"FAIL - {judge_info}" if judge_info else "FAIL"
-                    
-                    logger.info("    [%s] Run (%d/%d): %s", 
-                                model_name, completed_counts[model_name], NUM_RUNS, status)
-                    
-                    # Save implementation for manual check questions
-                    if questions_data[code].get("is_manual_check", False):
-                        human_eval.save_implementation(
-                            model_name=model_name,
-                            question_code=code,
-                            run_index=run_idx,
-                            html_content=result.get("response", ""),
-                            max_points=points
-                        )
-                    
-                except Exception as e:
-                    logger.error("Use-case error collecting future for %s run %d: %s", model_name, run_idx, e)
+                    # Mark that we have some processable results (for partial writes on crash/interrupt)
+                    processed_any_question = True
+            except TimeoutError:
+                logger.error("Timeout waiting for model responses for question %s. Skipping remaining runs.", code)
+                # Cancel remaining futures for this question
+                for f in futures_map:
+                    f.cancel()
 
             # Calculate scores for this question
             logger.info("\n--- Results for Question %s ---", code)
@@ -1039,8 +1046,6 @@ def run_benchmark() -> None:
                     logger.info("Model: %-30s | Score: %.2f/%d (%d/%d PASS)", 
                                 model_name, score, points, success_count, NUM_RUNS)
             
-            # Mark that we have processable results (for partial writes on crash)
-            processed_any_question = True
             
             # After last human eval question completes, finalize session and spawn server
             if (has_manual_checks 
@@ -1077,9 +1082,15 @@ def run_benchmark() -> None:
                 )
                 human_eval_server_spawned = True
 
-    except Exception as e:
+    except (Exception, KeyboardInterrupt) as e:
         benchmark_exception = e
-        logger.error("Benchmark crashed: %s", e)
+        if isinstance(e, KeyboardInterrupt):
+            logger.warning("Benchmark interrupted by user. Shutting down worker threads...")
+        else:
+            logger.error("Benchmark crashed: %s", e)
+            
+        # Force shutdown executor without waiting for hanging threads
+        executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Attempting to save partial results...")
 
     finally:
@@ -1202,6 +1213,9 @@ def run_benchmark() -> None:
 
         logger.info("=" * 60)
         
+        # Ensure executor is fully shutdown
+        executor.shutdown(wait=False)
+
         # Re-raise the exception after saving partial results (preserves original crash behavior)
         if benchmark_exception:
             raise benchmark_exception
