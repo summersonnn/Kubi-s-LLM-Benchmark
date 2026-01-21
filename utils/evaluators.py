@@ -54,7 +54,7 @@ class JudgeLLMEvaluator:
                 model_name=self.judge_model_name,
                 max_tokens=1024,
                 temperature=0.0,
-                timeout=60.0,
+                timeout=self.api.timeout / 3.0,
                 reasoning=False # Reasoning not needed for judge extraction
             )
             result_text = (response.choices[0].message.content or "").strip()
