@@ -833,9 +833,11 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
                     json.dump(manifest, f, indent=2)
 
                 # Trigger auto-integration if enabled and not already done
+                # Only integrate if results_file is present (meaning main benchmark finished writing results)
                 should_integrate = (all_scored 
                                     and EvaluationHandler.auto_integrate 
-                                    and not EvaluationHandler.integration_done)
+                                    and not EvaluationHandler.integration_done
+                                    and manifest.get("results_file"))
                 if should_integrate:
                     EvaluationHandler.integration_done = True
 

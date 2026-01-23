@@ -15,8 +15,8 @@
 !z-ai/glm-4.7@preset/fp8-speedy
 !z-ai/glm-4.7-flash@preset/fp8-speedy
 !nvidia/nemotron-3-nano-30b-a3b@preset/fp8
-!meta-llama/llama-4-scout@preset/fp8
-!mistralai/mistral-large-2512
+meta-llama/llama-4-scout@preset/fp8
+mistralai/mistral-large-2512
 !deepseek/deepseek-v3.2@preset/fp8
 !qwen/qwen3-235b-a22b-thinking-2507@preset/fp8
 !qwen/qwen3-max
@@ -26,4 +26,3 @@
 !qwen/qwen3-32b
 !xiaomi/mimo-v2-flash
 !google/gemma-3-27b-it
-mistralai/devstral-2512:free

@@ -8,8 +8,9 @@ import glob
 import subprocess
 import sys
 import argparse
+import re
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from dotenv import load_dotenv
 from utils.model_api import ModelAPI
 from openai import OpenAIError
@@ -373,6 +374,57 @@ def write_results_file(
     return filepath
 
 
+def get_question_metadata(question_path: str) -> Tuple[str, str]:
+    """
+    Groups questions into categories and subcategories based on folder structure.
+    Infer Category from the top-level folder inside 'questions/'.
+    Infer Subcategory from the specific subfolder, or 'General' if directly in Category folder.
+    """
+    # question_path is absolute. Get path relative to 'questions/' directory
+    # Expected path format: .../questions/<Category>/<Subcategory>/<Question.txt>
+    # or .../questions/<Category>/<Question.txt>
+    
+    try:
+        # Find where 'questions' directory ends
+        # We assume the script is running from the project root, so 'questions' is a direct child
+        # But question_path matches the glob result which is relative or absolute?
+        # resolve_question_path returns what glob returns. 
+        # main.py does: match = glob.glob(search_pattern, recursive=True)
+        # search_pattern is "questions/**/..." so matches are relative to CWD, starting with "questions/"
+        
+        # Normalize path just in case
+        norm_path = os.path.normpath(question_path)
+        parts = norm_path.split(os.sep)
+        
+        # Find index of 'questions'
+        try:
+            q_index = parts.index("questions")
+        except ValueError:
+            # Fallback if 'questions' not in path (unlikely given how we search)
+            return "Other", "Other"
+            
+        # Structure after 'questions': [Category, Subcategory?, Filename]
+        rel_parts = parts[q_index + 1:]
+        
+        if not rel_parts:
+            return "Other", "Other"
+            
+        category = rel_parts[0]
+        
+        # If we have [Category, Subcategory, Filename] (len >= 3)
+        if len(rel_parts) >= 3:
+            subcategory = rel_parts[1]
+        else:
+            # [Category, Filename]
+            subcategory = "General"
+            
+        return category, subcategory
+        
+    except Exception as e:
+        logger.error(f"Error inferring metadata for {question_path}: {e}")
+        return "Other", "Other"
+
+
 def process_single_run(
     api: ModelAPI,
     model_name: str,
@@ -470,7 +522,40 @@ def generate_performance_html(
     
     # Extract short model names - strip @preset/... suffix first, then take name after provider/
     short_models = [m.split("@")[0].split("/")[-1] for m in models]
+
+    # Dynamically determine category order
+    all_categories = set()
+    for q_data in questions_data.values():
+        cat = q_data.get("category", "Other")
+        all_categories.add(cat)
     
+    # Sort categories alphabetically, ensuring "Other" is last if present
+    category_list = sorted(list(all_categories))
+    if "Other" in category_list:
+        category_list.remove("Other")
+        category_list.append("Other")
+        
+    CATEGORY_ORDER = category_list
+
+    def sort_key(q_id):
+        data = questions_data.get(q_id, {})
+        cat = data.get("category", "Other")
+        sub = data.get("subcategory", "Other")
+
+        try:
+            cat_idx = CATEGORY_ORDER.index(cat)
+        except ValueError:
+            cat_idx = len(CATEGORY_ORDER)
+
+        # For numeric part (handling things like A1, A48.1, A48.10)
+        id_part = q_id.split('-')[0]
+        match = re.match(r'A(\d+(?:\.\d+)?)', id_part)
+        num = float(match.group(1)) if match else 999.0
+
+        return (cat_idx, sub, num)
+
+    sorted_q_ids = sorted(question_codes, key=sort_key)
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -526,17 +611,22 @@ def generate_performance_html(
                 <tbody>
     """
     
-    for q_id in question_codes:
+    for q_id in sorted_q_ids:
         q_data = questions_data.get(q_id, {})
         points = q_data.get("points", 1)
-        
+        category = q_data.get("category", "")
+        subcategory = q_data.get("subcategory", "")
+
         # Format points
         if isinstance(points, float) and points.is_integer():
             p_str = str(int(points))
         else:
             p_str = str(points)
-            
-        html_content += f"                    <tr>\n                        <td class='q-col'>{q_id}</td>\n                        <td>{p_str}</td>\n"
+
+        # Use only the ID (e.g., A1, A48.1)
+        display_id = q_id.split('-')[0]
+
+        html_content += f"                    <tr data-category='{category}' data-subcategory='{subcategory}'>\n                        <td class='q-col'>{display_id}</td>\n                        <td>{p_str}</td>\n"
         
         for model in models:
             model_results = all_results.get(q_id, {}).get(model, {})
@@ -757,13 +847,18 @@ def run_benchmark() -> None:
             # Fallback for questions not yet renamed or special cases
             eval_type = "eval by Judge LLM"
 
+        # Determine Category and Subcategory
+        category, subcategory = get_question_metadata(question_path)
+
         questions_data[code] = {
             "question": question,
             "ground_truth": ground_truth if ground_truth else "N/A",
             "points": points,
             "eval_type": eval_type,
             "is_manual_check": is_human_eval,
-            "is_verifier_eval": is_verifier_eval
+            "is_verifier_eval": is_verifier_eval,
+            "category": category,
+            "subcategory": subcategory
         }
         all_results[code] = {}
         valid_question_codes.append(code)
@@ -1127,7 +1222,7 @@ def run_benchmark() -> None:
         logger.info("[+] Advanced results file written to: %s", advanced_results_path)
         
         # Update manifest with results file paths so integrate_scores uses the correct files
-        if has_manual_checks and not benchmark_exception:
+        if has_manual_checks:
             human_eval.update_results_paths(results_file_path, advanced_results_path)
             
             # Store data needed for HTML generation (to be done after human eval completes)
@@ -1157,12 +1252,7 @@ def run_benchmark() -> None:
                 integrate_scores(session_dir)
                 
                 logger.info("Human evaluation scores integrated into results files.")
-                
-                # Generate HTML after integration (scores are now complete)
-                html_path = generate_performance_html(
-                    api.models, valid_question_codes, all_results, questions_data, run_timestamp
-                )
-                logger.info(" Performance table generated: file://%s", html_path)
+
             else:
                 # Human eval still in progress - HTML will be generated after integration
                 logger.info("\n" + "=" * 60)
@@ -1171,9 +1261,10 @@ def run_benchmark() -> None:
                 logger.info("Human evaluation server is running in the background.")
                 logger.info("Session directory: %s", session_dir)
                 logger.info("Complete scoring in the browser windows.")
-                logger.info("Scores will be auto-integrated upon completion.")
-                logger.info("Performance table will be generated after integration.")
-        elif not has_manual_checks:
+                logger.info("Run 'uv run python utils/integrate_human_scores.py %s' after completion.", session_dir)
+                logger.info("The integration script will update results and generate the performance table.")
+
+        else:
             # No human eval questions - generate HTML immediately
             html_path = generate_performance_html(
                 api.models, valid_question_codes, all_results, questions_data, run_timestamp

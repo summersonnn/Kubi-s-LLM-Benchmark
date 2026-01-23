@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Benchmark Performance Summary - Extended Mock</title>
+</head>
+<body>
+    <h1>Benchmark Performance Summary</h1>
+    <p style="text-align: center; color: #666;">Date: 20260121_160000</p>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th rowspan="2">Question Index</th>
+                    <th rowspan="2">Points</th>
+                    <th colspan="3" class="model-header">gpt-5-high</th>
+                    <th colspan="3" class="model-header">claude-opus-4-5</th>
+                    <th colspan="3" class="model-header">gemini-3-pro</th>
+                    <th colspan="3" class="model-header">devstral-2512</th>
+                    <th colspan="3" class="model-header">llama-4-405b</th>
+                    <th colspan="3" class="model-header">qwen-3-max</th>
+                    <th colspan="3" class="model-header">grok-3</th>
+                    <th colspan="3" class="model-header">mistral-large-3</th>
+                </tr>
+                <tr>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                    <th>Score</th><th>Tokens</th><th>Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Basic Mix - Anti-Overfitting -->
+                <tr data-category="Basic Mix" data-subcategory="Anti-Overfitting">
+                    <td class="q-col">A1-J-overfitting-test-farmer</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">1245</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1102</td><td class="cost">$0.03</td>
+                    <td class="score">0.5</td><td class="tokens">1890</td><td class="cost">$0.01</td>
+                    <td class="fail">FAIL</td><td class="tokens">2100</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1456</td><td class="cost">$0.02</td>
+                    <td class="score">0.5</td><td class="tokens">1678</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1334</td><td class="cost">$0.02</td>
+                    <td class="fail">FAIL</td><td class="tokens">2234</td><td class="cost">$0.01</td>
+                </tr>
+                <tr data-category="Basic Mix" data-subcategory="Anti-Overfitting">
+                    <td class="q-col">A2-J-overfitting-test-elevator</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">1567</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1340</td><td class="cost">$0.04</td>
+                    <td class="pass">PASS</td><td class="tokens">1456</td><td class="cost">$0.01</td>
+                    <td class="score">0.5</td><td class="tokens">1640</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1290</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1512</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1445</td><td class="cost">$0.02</td>
+                    <td class="score">0.5</td><td class="tokens">1890</td><td class="cost">$0.01</td>
+                </tr>
+
+                <!-- Basic Mix - Terminal Usage -->
+                <tr data-category="Basic Mix" data-subcategory="Terminal Usage">
+                    <td class="q-col">A3-V-terminal-unzip</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">654</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">712</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">890</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">764</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">678</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">734</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">701</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">812</td><td class="cost">$0.01</td>
+                </tr>
+                <tr data-category="Basic Mix" data-subcategory="Terminal Usage">
+                    <td class="q-col">A4-V-terminal-grep</td>
+                    <td>1</td>
+                    <td class="pass">PASS</td><td class="tokens">432</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">389</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">567</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">445</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">412</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">398</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">456</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">501</td><td class="cost">$0.00</td>
+                </tr>
+
+                <!-- Basic Mix - Others -->
+                <tr data-category="Basic Mix" data-subcategory="Others">
+                    <td class="q-col">A5-J-awareness-translation</td>
+                    <td>1</td>
+                    <td class="pass">PASS</td><td class="tokens">234</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">198</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">312</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">234</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">245</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">267</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">223</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">289</td><td class="cost">$0.00</td>
+                </tr>
+
+                <!-- Coding - Leetcode -->
+                <tr data-category="Coding" data-subcategory="Leetcode">
+                    <td class="q-col">A6-C-leetcode-two-sum</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">1890</td><td class="cost">$0.03</td>
+                    <td class="pass">PASS</td><td class="tokens">1654</td><td class="cost">$0.05</td>
+                    <td class="pass">PASS</td><td class="tokens">2100</td><td class="cost">$0.02</td>
+                    <td class="score">0.5</td><td class="tokens">2340</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1756</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1890</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1678</td><td class="cost">$0.03</td>
+                    <td class="score">0.5</td><td class="tokens">2456</td><td class="cost">$0.01</td>
+                </tr>
+                <tr data-category="Coding" data-subcategory="Leetcode">
+                    <td class="q-col">A7-C-leetcode-merge-intervals</td>
+                    <td>3</td>
+                    <td class="pass">PASS</td><td class="tokens">2456</td><td class="cost">$0.04</td>
+                    <td class="pass">PASS</td><td class="tokens">2123</td><td class="cost">$0.06</td>
+                    <td class="score">0.67</td><td class="tokens">3200</td><td class="cost">$0.03</td>
+                    <td class="fail">FAIL</td><td class="tokens">4500</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">2345</td><td class="cost">$0.03</td>
+                    <td class="score">0.67</td><td class="tokens">2890</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">2567</td><td class="cost">$0.04</td>
+                    <td class="fail">FAIL</td><td class="tokens">4100</td><td class="cost">$0.02</td>
+                </tr>
+
+                <!-- Coding - Competitive Gaming -->
+                <tr data-category="Coding" data-subcategory="Competitive Gaming">
+                    <td class="q-col">A8-C-codeforces-dp</td>
+                    <td>4</td>
+                    <td class="score">0.75</td><td class="tokens">3456</td><td class="cost">$0.05</td>
+                    <td class="pass">PASS</td><td class="tokens">2890</td><td class="cost">$0.08</td>
+                    <td class="score">0.5</td><td class="tokens">4100</td><td class="cost">$0.04</td>
+                    <td class="fail">FAIL</td><td class="tokens">5600</td><td class="cost">$0.02</td>
+                    <td class="score">0.5</td><td class="tokens">3890</td><td class="cost">$0.04</td>
+                    <td class="score">0.25</td><td class="tokens">4567</td><td class="cost">$0.03</td>
+                    <td class="score">0.75</td><td class="tokens">3234</td><td class="cost">$0.05</td>
+                    <td class="fail">FAIL</td><td class="tokens">5890</td><td class="cost">$0.03</td>
+                </tr>
+
+                <!-- Coding - Single HTML -->
+                <tr data-category="Coding" data-subcategory="Single HTML">
+                    <td class="q-col">A9-C-html-calculator</td>
+                    <td>3</td>
+                    <td class="pass">PASS</td><td class="tokens">4567</td><td class="cost">$0.07</td>
+                    <td class="pass">PASS</td><td class="tokens">3890</td><td class="cost">$0.11</td>
+                    <td class="pass">PASS</td><td class="tokens">5200</td><td class="cost">$0.05</td>
+                    <td class="score">0.33</td><td class="tokens">6700</td><td class="cost">$0.03</td>
+                    <td class="pass">PASS</td><td class="tokens">4123</td><td class="cost">$0.06</td>
+                    <td class="pass">PASS</td><td class="tokens">4890</td><td class="cost">$0.04</td>
+                    <td class="pass">PASS</td><td class="tokens">4234</td><td class="cost">$0.06</td>
+                    <td class="score">0.67</td><td class="tokens">5678</td><td class="cost">$0.03</td>
+                </tr>
+
+                <!-- General Knowledge (no subcategory) -->
+                <tr data-category="General Knowledge" data-subcategory="">
+                    <td class="q-col">A10-G-history-wwii</td>
+                    <td>1</td>
+                    <td class="pass">PASS</td><td class="tokens">345</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">289</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">412</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">367</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">334</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">378</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">312</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">401</td><td class="cost">$0.00</td>
+                </tr>
+                <tr data-category="General Knowledge" data-subcategory="">
+                    <td class="q-col">A11-G-geography-capitals</td>
+                    <td>1</td>
+                    <td class="pass">PASS</td><td class="tokens">189</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">156</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">234</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">201</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">178</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">212</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">167</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">223</td><td class="cost">$0.00</td>
+                </tr>
+
+                <!-- Reasoning - Chess puzzle -->
+                <tr data-category="Reasoning" data-subcategory="Chess puzzle">
+                    <td class="q-col">A12-R-chess-mate-in-two</td>
+                    <td>3</td>
+                    <td class="pass">PASS</td><td class="tokens">2345</td><td class="cost">$0.04</td>
+                    <td class="pass">PASS</td><td class="tokens">1987</td><td class="cost">$0.06</td>
+                    <td class="score">0.67</td><td class="tokens">3100</td><td class="cost">$0.03</td>
+                    <td class="fail">FAIL</td><td class="tokens">4200</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">2567</td><td class="cost">$0.04</td>
+                    <td class="score">0.33</td><td class="tokens">3456</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">2123</td><td class="cost">$0.03</td>
+                    <td class="fail">FAIL</td><td class="tokens">4567</td><td class="cost">$0.02</td>
+                </tr>
+
+                <!-- Reasoning - Word puzzle -->
+                <tr data-category="Reasoning" data-subcategory="Word puzzle">
+                    <td class="q-col">A13-R-word-anagram</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">567</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">489</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">678</td><td class="cost">$0.01</td>
+                    <td class="score">0.5</td><td class="tokens">890</td><td class="cost">$0.00</td>
+                    <td class="pass">PASS</td><td class="tokens">534</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">612</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">501</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">723</td><td class="cost">$0.01</td>
+                </tr>
+
+                <!-- Reasoning - Pure Reasoning -->
+                <tr data-category="Reasoning" data-subcategory="Pure Reasoning">
+                    <td class="q-col">A14-R-logic-syllogism</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">890</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">756</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1023</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">934</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">845</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">912</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">801</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">978</td><td class="cost">$0.01</td>
+                </tr>
+
+                <!-- STEM - Physics -->
+                <tr data-category="STEM" data-subcategory="Physics">
+                    <td class="q-col">A15-S-physics-kinematics</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">1234</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1089</td><td class="cost">$0.03</td>
+                    <td class="pass">PASS</td><td class="tokens">1456</td><td class="cost">$0.01</td>
+                    <td class="score">0.5</td><td class="tokens">1678</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1190</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1345</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1156</td><td class="cost">$0.02</td>
+                    <td class="score">0.5</td><td class="tokens">1567</td><td class="cost">$0.01</td>
+                </tr>
+
+                <!-- STEM - Chemistry -->
+                <tr data-category="STEM" data-subcategory="Chemistry">
+                    <td class="q-col">A16-S-chem-balancing</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">876</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">745</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">987</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">823</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">812</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">901</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">789</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">934</td><td class="cost">$0.01</td>
+                </tr>
+
+                <!-- STEM - Biology -->
+                <tr data-category="STEM" data-subcategory="Biology">
+                    <td class="q-col">A17-S-bio-genetics</td>
+                    <td>2</td>
+                    <td class="pass">PASS</td><td class="tokens">1567</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1345</td><td class="cost">$0.04</td>
+                    <td class="score">0.5</td><td class="tokens">1890</td><td class="cost">$0.02</td>
+                    <td class="fail">FAIL</td><td class="tokens">2100</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1456</td><td class="cost">$0.02</td>
+                    <td class="score">0.5</td><td class="tokens">1789</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">1389</td><td class="cost">$0.02</td>
+                    <td class="fail">FAIL</td><td class="tokens">2234</td><td class="cost">$0.01</td>
+                </tr>
+
+                <!-- STEM - Math -->
+                <tr data-category="STEM" data-subcategory="Math">
+                    <td class="q-col">A18-S-math-calculus</td>
+                    <td>3</td>
+                    <td class="pass">PASS</td><td class="tokens">2100</td><td class="cost">$0.03</td>
+                    <td class="pass">PASS</td><td class="tokens">1876</td><td class="cost">$0.05</td>
+                    <td class="pass">PASS</td><td class="tokens">2456</td><td class="cost">$0.02</td>
+                    <td class="score">0.33</td><td class="tokens">3200</td><td class="cost">$0.01</td>
+                    <td class="pass">PASS</td><td class="tokens">2012</td><td class="cost">$0.03</td>
+                    <td class="pass">PASS</td><td class="tokens">2345</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">1945</td><td class="cost">$0.03</td>
+                    <td class="score">0.67</td><td class="tokens">2890</td><td class="cost">$0.02</td>
+                </tr>
+                <tr data-category="STEM" data-subcategory="Math">
+                    <td class="q-col">A19-S-math-linear-algebra</td>
+                    <td>3</td>
+                    <td class="pass">PASS</td><td class="tokens">2345</td><td class="cost">$0.04</td>
+                    <td class="pass">PASS</td><td class="tokens">2012</td><td class="cost">$0.06</td>
+                    <td class="score">0.67</td><td class="tokens">2890</td><td class="cost">$0.03</td>
+                    <td class="fail">FAIL</td><td class="tokens">3800</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">2234</td><td class="cost">$0.03</td>
+                    <td class="score">0.33</td><td class="tokens">3123</td><td class="cost">$0.02</td>
+                    <td class="pass">PASS</td><td class="tokens">2189</td><td class="cost">$0.03</td>
+                    <td class="fail">FAIL</td><td class="tokens">3678</td><td class="cost">$0.02</td>
+                </tr>
+            </tbody>
+            <tfoot style="background-color: #f8f9fa; font-weight: bold; border-top: 2px solid #009879;">
+                <tr>
+                    <td colspan="2" style="text-align: right; padding-right: 20px;">TOTAL</td>
+                    <td class="score">36.75/41</td><td class="tokens">27237</td><td class="cost">$0.41</td>
+                    <td class="score">41/41</td><td class="tokens">23860</td><td class="cost">$0.68</td>
+                    <td class="score">31.01/41</td><td class="tokens">32873</td><td class="cost">$0.30</td>
+                    <td class="score">13.16/41</td><td class="tokens">42416</td><td class="cost">$0.19</td>
+                    <td class="score">37.5/41</td><td class="tokens">26100</td><td class="cost">$0.36</td>
+                    <td class="score">30.58/41</td><td class="tokens">31203</td><td class="cost">$0.25</td>
+                    <td class="score">37.75/41</td><td class="tokens">25245</td><td class="cost">$0.39</td>
+                    <td class="score">18.84/41</td><td class="tokens">40245</td><td class="cost">$0.23</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</body>
+</html>

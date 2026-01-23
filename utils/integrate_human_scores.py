@@ -94,50 +94,121 @@ def update_results_file(
     current_question = None
     in_model_section = False
     
-    for i, line in enumerate(lines):
-        # Detect model section header (e.g., "Z-AI/GLM-4.7 RESULTS:")
-        if " RESULTS:" in line and line.strip().endswith("RESULTS:"):
-            # Extract model name by removing " RESULTS:" suffix
-            current_model = line.strip().replace(" RESULTS:", "").lower()
-            in_model_section = True
-        
-        # Detect question line (e.g., "Question 1 (A44):")
-        if line.strip().startswith("Question ") and "(" in line and "):" in line:
-            start = line.find("(") + 1
-            end = line.find(")")
-            if start > 0 and end > start:
-                current_question = line[start:end]
-        
-        # Update score line for manual check questions
-        if line.strip().startswith("Score:") and current_question and current_question in scores:
-            model_scores = scores.get(current_question, {})
-            matched_score = None
-            
-            # Try to match current_model to one of the model names
-            for model_name, avg in model_scores.items():
-                model_lower = model_name.lower()
-                # Match if current_model contains model_name or vice versa
-                if current_model and (model_lower in current_model or current_model in model_lower or 
-                                      model_lower.split("/")[-1] in current_model):
-                    # Scores are absolute, use directly
-                    matched_score = avg
+    # Track final totals for leaderboard
+    model_totals: Dict[str, float] = {}
+    model_possible: Dict[str, float] = {}
+    
+    # Remove existing FINAL MODEL RANKINGS section if it exists (to avoid duplication on re-runs)
+    final_section_start = -1
+    for idx, line in enumerate(lines):
+        if "HUMAN EVALUATION ADDENDUM" in line or "FINAL MODEL RANKINGS" in line:
+            # Look back for the start of the section (markers like === or ###)
+            for j in range(idx - 1, max(0, idx - 5), -1):
+                if lines[j].startswith("=") or lines[j].startswith("#"):
+                    final_section_start = j
                     break
-            
-            if matched_score is not None:
-                points = question_points.get(current_question, 1)
-                # Preserve indentation
-                indent = len(line) - len(line.lstrip())
-                updated_lines.append(" " * indent + f"Score: {matched_score:.2f}/{points} (Human Eval)")
-                continue
+            if final_section_start == -1:
+                final_section_start = idx
+            break
+    
+    if final_section_start != -1:
+        lines = lines[:final_section_start]
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
         
-        # Also update "Runs:" line to show human eval scores
-        if line.strip().startswith("Runs:") and current_question and current_question in scores:
+        # Detect model section header
+        if stripped.endswith(" RESULTS:") and " " in stripped:
+            current_model_raw = stripped.replace(" RESULTS:", "")
+            current_model = current_model_raw.lower()
+            if current_model_raw not in model_totals:
+                model_totals[current_model_raw] = 0.0
+                model_possible[current_model_raw] = 0.0
+        elif stripped.startswith("MODEL: "):
+            current_model_raw = stripped.replace("MODEL: ", "")
+            current_model = current_model_raw.lower()
+            if current_model_raw not in model_totals:
+                model_totals[current_model_raw] = 0.0
+                model_possible[current_model_raw] = 0.0
+        
+        # Detect question header
+        if stripped.lower().startswith("question "):
+            if "(" in line and "):" in line: # Regular format
+                start = line.find("(") + 1
+                end = line.find(")")
+                if start > 0 and end > start:
+                    current_question = line[start:end]
+            elif ":" in line: # Advanced format
+                parts = line.split(":")
+                id_part = parts[1].strip()
+                # Ensure it's not "QUESTION TEXT:" or "QUESTION ID:"
+                if id_part and id_part != "TEXT" and not id_part.startswith("TEXT") and id_part != "ID":
+                    current_question = id_part
+        
+        # Update score line
+        if stripped.lower().startswith("score:") and current_question:
+            indent = len(line) - len(line.lstrip())
+            
+            # Parse existing points if possible
+            total_pts = 1.0
+            if "/" in line:
+                try:
+                    points_part = line.split("/")[1].strip()
+                    points_val = points_part.split("(")[0].split()[0].strip()
+                    total_pts = float(points_val)
+                except (ValueError, IndexError):
+                    pass
+
+            if current_question in scores:
+                model_scores = scores.get(current_question, {})
+                matched_score = None
+                
+                # Try to match current_model to one of the model names in scores
+                # Strict matching: exact or one is a path suffix of the other
+                for model_name, avg in model_scores.items():
+                    model_lower = model_name.lower()
+                    if current_model and (model_lower == current_model or 
+                                          model_lower.endswith("/" + current_model) or 
+                                          current_model.endswith("/" + model_lower)):
+                        matched_score = avg
+                        break
+                
+                if matched_score is not None:
+                    # Use provided question_points or fallback to total_pts from file
+                    points = question_points.get(current_question, total_pts)
+                    
+                    # Preserve original casing and spacing
+                    score_prefix = "Score" if line.lstrip().startswith("Score") else "SCORE"
+                    updated_lines.append(" " * indent + f"{score_prefix}: {matched_score:.2f}/{points:.1f} (Human Eval)")
+                    
+                    # Update totals
+                    for model_raw in model_totals:
+                        if model_raw.lower() == current_model:
+                            model_totals[model_raw] += matched_score
+                            model_possible[model_raw] += points
+                    continue
+            
+            # If not a human eval question, track existing score for leaderboard
+            try:
+                score_part = line.split(":")[1].split("/")[0].strip()
+                existing_score = float(score_part)
+                for model_raw in model_totals:
+                    if model_raw.lower() == current_model:
+                        model_totals[model_raw] += existing_score
+                        model_possible[model_raw] += total_pts
+            except (ValueError, IndexError):
+                pass
+        
+        # Also update "Runs:" line
+        if stripped.lower().startswith("runs:") and current_question and current_question in scores:
             model_scores = scores.get(current_question, {})
             replaced = False
             for model_name, avg in model_scores.items():
                 model_lower = model_name.lower()
-                if current_model and (model_lower in current_model or current_model in model_lower or
-                                      model_lower.split("/")[-1] in current_model):
+                if current_model and (model_lower == current_model or 
+                                      model_lower.endswith("/" + current_model) or 
+                                      current_model.endswith("/" + model_lower)):
+                    points = question_points.get(current_question, 1)
                     indent = len(line) - len(line.lstrip())
                     updated_lines.append(" " * indent + f"Runs: Human Eval (avg: {avg:.1f}/{points})")
                     replaced = True
@@ -146,6 +217,7 @@ def update_results_file(
                 continue
         
         updated_lines.append(line)
+
     
     # Append Human Evaluation Addendum section
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -168,6 +240,35 @@ def update_results_file(
         addendum.append("")
     
     addendum.append("=" * 80)
+    
+    # Append Final Leaderboard
+    addendum.extend([
+        "",
+        "#" * 80,
+        "FINAL MODEL RANKINGS (Automated + Human Evaluation)",
+        "#" * 80,
+    ])
+    
+    # Sort models by total score
+    ranked_models = sorted(model_totals.items(), key=lambda x: x[1], reverse=True)
+    for i, (model_name, total_score) in enumerate(ranked_models, 1):
+        possible = model_possible.get(model_name, 1.0)
+        percentage = (total_score / possible * 100) if possible > 0 else 0
+        
+        # Format score with decimals only if needed
+        if total_score.is_integer():
+            s_str = f"{int(total_score)}"
+        else:
+            s_str = f"{total_score:.2f}"
+            
+        if possible.is_integer():
+            p_str = f"{int(possible)}"
+        else:
+            p_str = f"{possible:.2f}"
+            
+        addendum.append(f"{i}. {model_name}: {s_str}/{p_str} points ({percentage:.1f}%)")
+        
+    addendum.append("#" * 80)
     updated_lines.extend(addendum)
     
     # Write updated content
@@ -302,25 +403,25 @@ def integrate_scores(session_dir: str) -> None:
     os.makedirs("results", exist_ok=True)
     os.makedirs("results_advanced", exist_ok=True)
 
-    # Update results files - prefer paths from manifest if available
+    # Update results files - only if paths are provided in manifest
     results_file = manifest.get("results_file")
-    if not results_file or not os.path.exists(results_file):
-        results_file = find_latest_results_file("results")
-
-    if results_file:
+    if results_file and os.path.exists(results_file):
         update_results_file(results_file, scores, question_points)
+    elif results_file:
+        logger.error("Results file specified in manifest but not found: %s", results_file)
     else:
-        # Generate a standalone human eval results file
+        # Generate a standalone human eval results file if no benchmark results exist
+        # This is for manual server runs outside of the main benchmark
+        logger.info("No results file specified in manifest. Generating standalone results.")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results_file = os.path.join("results", f"human_eval_results_{timestamp}.txt")
         generate_standalone_results(results_file, scores, question_points)
 
     advanced_file = manifest.get("advanced_results_file")
-    if not advanced_file or not os.path.exists(advanced_file):
-        advanced_file = find_latest_results_file("results_advanced")
-
-    if advanced_file:
+    if advanced_file and os.path.exists(advanced_file):
         update_results_file(advanced_file, scores, question_points)
+    elif advanced_file:
+        logger.error("Advanced results file specified in manifest but not found: %s", advanced_file)
     else:
         logger.info("No advanced results file to update (this is normal for manual server runs)")
     
