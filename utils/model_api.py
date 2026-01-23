@@ -144,7 +144,7 @@ class ModelAPI:
             extra_body=extra_body,
             **kwargs
         )
-        
+
         full_content = []
         reasoning_content = []
         usage = None

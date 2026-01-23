@@ -53,17 +53,45 @@ class JudgeLLMEvaluator:
         # Judge timeout = (api.timeout * points) / 3.0
         judge_timeout = (self.api.timeout * points) / 3.0
         
+        max_retries = 3
+        result_text = ""
+        
         try:
-            response = self.api.call(
-                prompt=prompt,
-                model_name=self.judge_model_name,
-                max_tokens=1024,
-                temperature=0.0,
-                timeout=judge_timeout,
-                reasoning=False # Reasoning not needed for judge extraction
-            )
-            result_text = (response.choices[0].message.content or "").strip()
-            
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = self.api.call(
+                        prompt=prompt,
+                        model_name=self.judge_model_name,
+                        max_tokens=1024,
+                        temperature=0.0,
+                        timeout=judge_timeout,
+                        reasoning=False # Reasoning not needed for judge extraction
+                    )
+                    result_text = (response.choices[0].message.content or "").strip()
+                    break # Success, exit retry loop
+                    
+                except (TimeoutError, Exception) as e:
+                    # Check if it looks like a timeout
+                    is_timeout = isinstance(e, TimeoutError) or "timeout" in str(e).lower()
+                    
+                    if is_timeout:
+                        logger.warning(
+                            "Judge LLM timed out (Attempt %d/%d). Retrying...", 
+                            attempt, max_retries
+                        )
+                        if attempt == max_retries:
+                            logger.error("Judge LLM failed after %d retries due to timeout.", max_retries)
+                            return {
+                                "success": False,
+                                "reasoning": f"Judge LLM timed out after {max_retries} attempts.",
+                                "verdict": "Error"
+                            }
+                        import time
+                        time.sleep(1) # Brief pause before retry
+                    else:
+                        # Non-timeout error - propagate to outer try/except
+                        raise e
+
             # Parse reasoning and verdict
             # Expecting format: "Reasoning: ... Verdict: Pass/Fail"
             verdict = "Fail"
@@ -89,6 +117,7 @@ class JudgeLLMEvaluator:
                 "reasoning": reasoning,
                 "verdict": verdict
             }
+
         except Exception as e:
             logger.error("Judge evaluation failed: %s", e)
             return {
