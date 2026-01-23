@@ -445,8 +445,17 @@ def process_single_run(
         # Calculate effective max tokens based on question points
         effective_max_tokens = api.max_tokens * points
         
+        # Calculate dynamic timeout based on question points
+        # Base timeout is for 1 point. Scale linearly.
+        dynamic_timeout = api.timeout * points
+        
         # Call the model with ONLY the question and effective max tokens
-        response = api.call(question, model_index=model_index, max_tokens=effective_max_tokens)
+        response = api.call(
+            question, 
+            model_index=model_index, 
+            max_tokens=effective_max_tokens,
+            timeout=dynamic_timeout
+        )
 
         # Extract content and reasoning for advanced results
         message = response.choices[0].message
@@ -470,7 +479,7 @@ def process_single_run(
             judge_reasoning = eval_result["reasoning"]
             judge_verdict = eval_result["verdict"]
         elif ground_truth:
-            eval_result = judge.evaluate(question, ground_truth, content)
+            eval_result = judge.evaluate(question, ground_truth, content, points=points)
             is_successful = eval_result["success"]
             judge_reasoning = eval_result["reasoning"]
             judge_verdict = eval_result["verdict"]

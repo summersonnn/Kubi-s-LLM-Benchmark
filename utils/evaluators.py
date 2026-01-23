@@ -41,12 +41,17 @@ class JudgeLLMEvaluator:
         with open(path, "r") as f:
             return f.read().strip()
 
-    def evaluate(self, question: str, ground_truth: str, answer: str) -> dict[str, Any]:
+    def evaluate(self, question: str, ground_truth: str, answer: str, points: int = 1) -> dict[str, Any]:
         """
         Uses the judge LLM to evaluate the answer against the ground truth.
         Returns a dictionary with 'success', 'reasoning', and 'verdict'.
         """
         prompt = self._build_judge_prompt(question, ground_truth, answer)
+        
+        # Judge timeout is 1/3 of the competing model's timeout for the same points
+        # Competing model timeout = api.timeout * points
+        # Judge timeout = (api.timeout * points) / 3.0
+        judge_timeout = (self.api.timeout * points) / 3.0
         
         try:
             response = self.api.call(
@@ -54,7 +59,7 @@ class JudgeLLMEvaluator:
                 model_name=self.judge_model_name,
                 max_tokens=1024,
                 temperature=0.0,
-                timeout=self.api.timeout / 3.0,
+                timeout=judge_timeout,
                 reasoning=False # Reasoning not needed for judge extraction
             )
             result_text = (response.choices[0].message.content or "").strip()
