@@ -17,7 +17,9 @@ from openai import OpenAIError
 from utils.utils import setup_logging, parse_question_file, kill_process_on_port, clear_history
 from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, VerifierEvaluator
 from utils.cost_effective import find_model_folder, get_existing_implementations
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# from concurrent.futures import ThreadPoolExecutor -> Removed for Async
+import asyncio
+from openai import AsyncOpenAI
 
 # Load environment variables
 load_dotenv()
@@ -425,7 +427,7 @@ def get_question_metadata(question_path: str) -> Tuple[str, str]:
         return "Other", "Other"
 
 
-def process_single_run(
+async def process_single_run(
     api: ModelAPI,
     model_name: str,
     model_index: int,
@@ -449,8 +451,7 @@ def process_single_run(
         # Base timeout is for 1 point. Scale linearly.
         dynamic_timeout = api.timeout * points
         
-        # Call the model with ONLY the question and effective max tokens
-        response = api.call(
+        response = await api.call(
             question, 
             model_index=model_index, 
             max_tokens=effective_max_tokens,
@@ -474,12 +475,12 @@ def process_single_run(
         judge_verdict = None
 
         if is_verifier_eval:
-            eval_result = verifier_eval.evaluate(question_code, question, content)
+            eval_result = await verifier_eval.evaluate(question_code, question, content)
             is_successful = eval_result["success"]
             judge_reasoning = eval_result["reasoning"]
             judge_verdict = eval_result["verdict"]
         elif ground_truth:
-            eval_result = judge.evaluate(question, ground_truth, content, points=points)
+            eval_result = await judge.evaluate(question, ground_truth, content, points=points)
             is_successful = eval_result["success"]
             judge_reasoning = eval_result["reasoning"]
             judge_verdict = eval_result["verdict"]
@@ -726,42 +727,52 @@ def generate_performance_html(
 
 
 
-def run_benchmark() -> None:
+async def run_benchmark(specific_questions: List[str] | None = None) -> None:
     """
-    Executes the benchmark for questions defined in questions.txt across all loaded models.
+    Executes the benchmark for questions.
+    
+    Args:
+        specific_questions: If provided, runs benchmark ONLY on these question codes.
+                            If None, reads question codes from config/questions.txt.
     """
     questions_file = "config/questions.txt"
-    if not os.path.exists(questions_file):
-        logger.error("questions.txt not found.")
-        return
+    
+    if specific_questions:
+        logger.info(f"Running benchmark on {len(specific_questions)} specific questions provided by system.")
+        question_codes = specific_questions
+    else:
+        # Standard flow: Run from questions.txt
+        if not os.path.exists(questions_file):
+            logger.error("questions.txt not found.")
+            return
 
-    with open(questions_file, "r") as f:
-        raw_lines = [line.strip() for line in f if line.strip()]
+        with open(questions_file, "r") as f:
+            raw_lines = [line.strip() for line in f if line.strip()]
 
-    if not raw_lines:
-        logger.error("No question codes found in questions.txt")
-        return
+        if not raw_lines:
+            logger.error("No question codes found in questions.txt")
+            return
 
-    # Expand subfolder entries (lines ending with "/") to all questions in that subfolder
-    question_codes = []
-    for line in raw_lines:
-        if line.endswith("/"):
-            # Treat as subfolder path relative to questions directory
-            subfolder_path = os.path.join("questions", line.rstrip("/"))
-            if os.path.isdir(subfolder_path):
-                subfolder_files = glob.glob(os.path.join(subfolder_path, "*.txt"))
-                for fpath in subfolder_files:
-                    fname = os.path.basename(fpath)
-                    # Exclude known non-question files
-                    if fname in ["html_css_js_questions_prefix.txt", "readme.txt", "README.txt"]:
-                        continue
-                    code = os.path.splitext(fname)[0]
-                    question_codes.append(code)
-                logger.info("Expanded '%s' to %d questions.", line, len(subfolder_files))
+        # Expand subfolder entries (lines ending with "/") to all questions in that subfolder
+        question_codes = []
+        for line in raw_lines:
+            if line.endswith("/"):
+                # Treat as subfolder path relative to questions directory
+                subfolder_path = os.path.join("questions", line.rstrip("/"))
+                if os.path.isdir(subfolder_path):
+                    subfolder_files = glob.glob(os.path.join(subfolder_path, "*.txt"))
+                    for fpath in subfolder_files:
+                        fname = os.path.basename(fpath)
+                        # Exclude known non-question files
+                        if fname in ["html_css_js_questions_prefix.txt", "readme.txt", "README.txt"]:
+                            continue
+                        code = os.path.splitext(fname)[0]
+                        question_codes.append(code)
+                    logger.info("Expanded '%s' to %d questions.", line, len(subfolder_files))
+                else:
+                    logger.warning("Subfolder '%s' not found, skipping.", subfolder_path)
             else:
-                logger.warning("Subfolder '%s' not found, skipping.", subfolder_path)
-        else:
-            question_codes.append(line)
+                question_codes.append(line)
 
     if not question_codes:
         logger.error("No question codes found after expansion")
@@ -905,40 +916,29 @@ def run_benchmark() -> None:
     benchmark_exception = None
     processed_any_question = False
 
-    # ThreadPoolExecutor for parallel runs
-    # We want max parallelism, but let's limit to something reasonable
-    # (e.g. 7 models * 4 runs = 28 concurrent requests by default)
-    max_workers = int(os.getenv("MAX_WORKERS", "28"))
-    executor = ThreadPoolExecutor(max_workers=max_workers)
+    # Async concurrency control
+    max_workers_count = int(os.getenv("MAX_WORKERS", "28"))
+    semaphore = asyncio.Semaphore(max_workers_count)
+
+    async def run_with_semaphore(
+        api, model_name, model_index, question_code, question, ground_truth, points, judge, verifier_eval, human_eval, is_verifier_eval
+    ):
+        async with semaphore:
+            return await process_single_run(
+                api, model_name, model_index, question_code, question, ground_truth, points, judge, verifier_eval, human_eval, is_verifier_eval
+            )
+
     try:
         for code in sorted_question_codes:
             data = questions_data[code]
             question = data["question"]
             ground_truth = data["ground_truth"]
-            # Convert "N/A" back to None/Empty if needed for logic, but process_single_run handles strings. 
-            # Note: parse_question_file returns None for empty GT? Check. 
-            # Actually process_single_run expects ground_truth string.
-            # If "N/A" was stored, we should be careful. 
-            # data["ground_truth"] stores "N/A" if empty.
-            # Let's revert to None if "N/A" for the logic check in process_single_run or fix logic.
-            # actually parse_question_file returns None or string.
-            # Stored as "N/A" in dict.
-            # process_single_run logic: `if ground_truth:`
-            # If we pass "N/A", it evaluates as true.
-            # So we should pass the original ground truth or handle "N/A".
-            # Let's clean this up. parse_question_file returns None if missing.
-            # In questions_data assignment above: "ground_truth": ground_truth if ground_truth else "N/A"
-            # So we lost the None-ness.
-            
-            # Correction: Let's use the eval_type to determine what to pass or just fix the storage.
-            # Simpler: Pass proper ground_truth.
             gt_for_run = ground_truth if ground_truth != "N/A" else None
             points = data["points"]
             
             logger.info("\n" + "=" * 60)
             logger.info("PROCESSING QUESTION: %s", code)
             logger.info("=" * 60)
-            # Truncate very long prompts in console logs (e.g., A58 BattleShip)
             if len(question) > 1000:
                 logger.info("--- Question [%s] (Points: %d) ---\n[Prompt truncated - %d chars]\n-----------------\n", code, points, len(question))
             else:
@@ -947,17 +947,16 @@ def run_benchmark() -> None:
             if gt_for_run:
                 logger.info("[*] Expected Ground Truth: %s\n", gt_for_run)
 
-            # Dictionary to hold futures for this question
-            # Key: future, Value: (model_name, run_index)
-            futures_map = {}
+            # Prepare tasks for this question
+            tasks = []
+            # Keep track of which model/run each task belongs to
+            # task_info[task_idx] = (model_name, run_idx)
+            task_info = []
 
-            # Submit all runs for all models for this question
             for i, model_name in enumerate(api.models):
                 all_results[code][model_name] = {"runs": [], "score": 0.0}
                 
-                # Check for cached implementations (human_eval questions only)
                 cached_impls = []
-                
                 if COST_EFFECTIVE_ENABLED:
                     model_folder = find_model_folder(model_name)
                     if model_folder:
@@ -976,7 +975,7 @@ def run_benchmark() -> None:
                 else:
                     logger.info("[*] Submitting %d runs for Model: %s...", NUM_RUNS, model_name)
                 
-                # Process cached implementations first
+                # Handle cached runs immediately
                 for cached in cached_impls:
                     content = cached["content"]
                     is_manual = questions_data[code].get("is_manual_check", False)
@@ -985,32 +984,30 @@ def run_benchmark() -> None:
                         judge_reasoning = "Loaded from cost-effective cache"
                         judge_verdict = "Pending"
                         is_successful = False
-                        
-                        # Save implementation for human eval
                         human_eval.save_implementation(
                             model_name=model_name,
                             question_code=code,
-                            run_index=cached["run_index"] - 1,  # Convert 1-indexed to 0-indexed
+                            run_index=cached["run_index"] - 1,
                             html_content=content,
                             max_points=points
                         )
                         status_log = "PENDING (Human Eval)"
                     elif questions_data[code].get("is_verifier_eval", False):
-                        # Run evaluation on cached content
-                        eval_result = verifier_eval.evaluate(code, question, content)
+                        # For async verification, we can wait or just run it. 
+                        # Since it's cached content, let's just await it properly here.
+                        eval_result = await verifier_eval.evaluate(code, question, content)
                         is_successful = eval_result["success"]
                         judge_reasoning = f"{eval_result['reasoning']} (Cached)"
                         judge_verdict = eval_result["verdict"]
                         status_log = "PASS" if is_successful else "FAIL"
                     elif gt_for_run:
-                        # Run evaluation on cached content
-                        eval_result = judge.evaluate(question, gt_for_run, content)
+                        # For async judge, same deal.
+                        eval_result = await judge.evaluate(question, gt_for_run, content)
                         is_successful = eval_result["success"]
                         judge_reasoning = f"{eval_result['reasoning']} (Cached)"
                         judge_verdict = eval_result["verdict"]
                         status_log = "PASS" if is_successful else "FAIL"
                     else:
-                        # Should not happen unless config is weird
                         is_successful = False
                         judge_reasoning = "No Ground Truth - Cached"
                         judge_verdict = "Unknown"
@@ -1026,16 +1023,14 @@ def run_benchmark() -> None:
                         "cost": 0.0
                     }
                     all_results[code][model_name]["runs"].append(cached_result)
-                    
                     logger.info(
                         "    [%s] Run (%d/%d): CACHED (from %s) - %s",
                         model_name, cached["run_index"], NUM_RUNS, cached["source_file"], status_log
                     )
-                
-                # Submit only the remaining runs needed
+
+                # Queue new runs
                 for run_idx in range(num_cached, NUM_RUNS):
-                    future = executor.submit(
-                        process_single_run,
+                    coroutine = run_with_semaphore(
                         api=api,
                         model_name=model_name,
                         model_index=i,
@@ -1048,23 +1043,37 @@ def run_benchmark() -> None:
                         human_eval=human_eval,
                         is_verifier_eval=questions_data[code].get("is_verifier_eval", False)
                     )
-                    futures_map[future] = (model_name, run_idx)
+                    tasks.append(coroutine)
+                    task_info.append((model_name, run_idx))
 
-            # Collect results as they complete
-            # Initialize counts with cached implementations already processed
-            completed_counts = {model: len(all_results[code][model]["runs"]) for model in api.models}
-            
-            # Use a safety timeout on as_completed (API timeout + 60s buffer)
-            try:
-                for future in as_completed(futures_map, timeout=api.timeout + 60):
-                    model_name, run_idx = futures_map[future]
+            # Run all tasks for this question
+            if tasks:
+                completed_counts = {model: len(all_results[code][model]["runs"]) for model in api.models}
+                
+                # Execute tasks concurrently
+                # BETTER APPROACH: asyncio.gather or manual wrapping.
+                # Let's wrap inside the loop.
+                async def wrapped_task(name, idx, coro):
                     try:
-                        result = future.result()
+                        res = await coro
+                        return res, name, idx, None
+                    except Exception as exc:
+                        return None, name, idx, exc
+
+                wrapped_coroutines = [
+                    wrapped_task(m_name, r_idx, task) 
+                    for (m_name, r_idx), task in zip(task_info, tasks)
+                ]
+                
+                for task_result in asyncio.as_completed(wrapped_coroutines):
+                    result, model_name, run_idx, error = await task_result
+                    
+                    if error:
+                        logger.error("Error collecting future for %s run %d: %s", model_name, run_idx, error)
+                    else:
                         all_results[code][model_name]["runs"].append(result)
-                        
                         completed_counts[model_name] += 1
                         
-                        # Extract detailed info from judge_reasoning if available
                         judge_info = result.get("judge_reasoning", "")
                         if result.get("judge_verdict") == "Pending":
                             status = "PENDING"
@@ -1076,7 +1085,6 @@ def run_benchmark() -> None:
                         logger.info("    [%s] Run (%d/%d): %s", 
                                     model_name, completed_counts[model_name], NUM_RUNS, status)
                         
-                        # Save implementation for manual check questions
                         if questions_data[code].get("is_manual_check", False):
                             human_eval.save_implementation(
                                 model_name=model_name,
@@ -1085,58 +1093,40 @@ def run_benchmark() -> None:
                                 html_content=result.get("response", ""),
                                 max_points=points
                             )
-                        
-                    except Exception as e:
-                        logger.error("Error collecting future for %s run %d: %s", model_name, run_idx, e)
                     
-                    # Mark that we have some processable results (for partial writes on crash/interrupt)
                     processed_any_question = True
-            except TimeoutError:
-                logger.error("Timeout waiting for model responses for question %s. Skipping remaining runs.", code)
-                # Cancel remaining futures for this question
-                for f in futures_map:
-                    f.cancel()
 
             # Calculate scores for this question
             logger.info("\n--- Results for Question %s ---", code)
             for model_name in api.models:
                 runs = all_results[code][model_name]["runs"]
-                
-                # Aggregate token usage and cost across all runs
                 total_tokens = sum(r.get("completion_tokens", 0) for r in runs)
                 total_cost = sum(r.get("cost", 0.0) for r in runs)
                 
-                # Check if this is a granular scoring question (parse SCORE:X/Y from reasoning)
                 total_run_score = 0.0
                 has_granular_scores = False
                 
                 for r in runs:
                     reasoning = r.get("judge_reasoning", "")
-                    # Try to parse "SCORE:X/Y" pattern
                     import re
                     score_match = re.search(r'SCORE:(\d+)/(\d+)', reasoning)
                     if score_match:
                         has_granular_scores = True
                         run_score = int(score_match.group(1))
                         run_max = int(score_match.group(2))
-                        # Store the run's granular score for display
                         r["run_score"] = run_score
                         r["run_max"] = run_max
-                        # Normalize to question's point value
                         total_run_score += (run_score / run_max) * points
                     else:
-                        # Fallback: binary success = full points, fail = 0
                         if r.get("success", False):
                             total_run_score += points
                 
-                # Average across all runs
                 score = total_run_score / NUM_RUNS if NUM_RUNS > 0 else 0
                 all_results[code][model_name]["score"] = score
                 all_results[code][model_name]["total_tokens"] = total_tokens
                 all_results[code][model_name]["total_cost"] = total_cost
                 
                 if has_granular_scores:
-                    # Show detailed per-run scores
                     run_details = []
                     for r in runs:
                         if "run_score" in r:
@@ -1150,8 +1140,7 @@ def run_benchmark() -> None:
                     logger.info("Model: %-30s | Score: %.2f/%d (%d/%d PASS)", 
                                 model_name, score, points, success_count, NUM_RUNS)
             
-            
-            # After last human eval question completes, finalize session and spawn server
+            # Subprocess spawning logic (human eval)
             if (has_manual_checks 
                 and human_eval_codes 
                 and code == human_eval_codes[-1] 
@@ -1159,42 +1148,26 @@ def run_benchmark() -> None:
                 
                 human_eval.finalize_session()
                 session_dir = human_eval.get_session_dir()
-                
-                logger.info("\n" + "=" * 60)
-                logger.info("SPAWNING HUMAN EVALUATION SERVER")
-                logger.info("=" * 60)
-                logger.info("Human eval questions complete. Spawning server in background.")
-                logger.info("Session directory: %s", session_dir)
-                logger.info("Automated questions will continue processing.")
-                logger.info("=" * 60 + "\n")
-                
-                # Spawn subprocess detached from parent
+                logger.info("\n" + "=" * 60 + "\nSPAWNING HUMAN EVALUATION SERVER")
+                # ... (rest of spawn logic same as before)
+                # ... Simplified for replacement brevity as we kept logic ...
+                # Re-implementing spawn logic:
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 server_script = os.path.join(script_dir, "utils", "human_eval_server.py")
-                
                 logger.info("Launching: %s %s", server_script, session_dir)
-                
-                # Kill any existing server instance on this port
-                logger.info("Ensuring port 8765 is free...")
                 kill_process_on_port(8765)
-                
-                # Don't use start_new_session - it breaks webbrowser.open() 
-                # as it loses access to the display environment
                 subprocess.Popen(
                     [sys.executable, server_script, session_dir],
                     cwd=script_dir
                 )
                 human_eval_server_spawned = True
 
-    except (Exception, KeyboardInterrupt) as e:
+    except (Exception, KeyboardInterrupt, asyncio.CancelledError) as e:
         benchmark_exception = e
         if isinstance(e, KeyboardInterrupt):
-            logger.warning("Benchmark interrupted by user. Shutting down worker threads...")
+            logger.warning("Benchmark interrupted by user.")
         else:
             logger.error("Benchmark crashed: %s", e)
-            
-        # Force shutdown executor without waiting for hanging threads
-        executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Attempting to save partial results...")
 
     finally:
@@ -1314,7 +1287,7 @@ def run_benchmark() -> None:
         logger.info("=" * 60)
         
         # Ensure executor is fully shutdown
-        executor.shutdown(wait=False)
+        pass
 
         # Re-raise the exception after saving partial results (preserves original crash behavior)
         if benchmark_exception:
@@ -1332,13 +1305,49 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    
+    from utils.question_renamer import ensure_question_naming_convention
 
-    if args.delete_history:
-        logger.info("=" * 60)
-        logger.info("CLEARING BENCHMARK HISTORY")
-        logger.info("=" * 60)
-        clear_history()
-        logger.info("=" * 60)
+    # Check for "!!!" trigger in questions.txt
+    questions_file = "config/questions.txt"
+    run_only_renamed = False
+    
+    if os.path.exists(questions_file):
+        with open(questions_file, "r") as f:
+            content = f.read().strip()
+            if content == "!!!":
+                run_only_renamed = True
 
-    run_benchmark()
+    if run_only_renamed:
+        print("Trigger '!!!' detected. Running benchmark ONLY on identified non-conforming questions.")
+        
+        # 1. Rename and get list
+        new_codes = ensure_question_naming_convention()
+        
+        if not new_codes:
+            print("No non-conforming questions were found/renamed. Exiting as requested by '!!!' trigger.")
+            # We exit here because the user explicitly asked to run on *renamed* files. 
+            # If none were renamed, there's nothing to run.
+            sys.exit(0)
+            
+        print(f"Renamed {len(new_codes)} questions. Starting benchmark for: {new_codes}")
+        
+        # 2. Run benchmark on specific new codes
+        asyncio.run(run_benchmark(specific_questions=new_codes))
+
+    else:
+        # Standard behavior
+        # Enforce naming conventions (we don't constrain run to these, just tidy up)
+        ensure_question_naming_convention()
+
+        if args.delete_history:
+            logger.info("=" * 60)
+            logger.info("CLEARING BENCHMARK HISTORY")
+            logger.info("=" * 60)
+            clear_history()
+            logger.info("=" * 60)
+
+        asyncio.run(run_benchmark())
+
+    logger.info("Benchmark run complete.")
 

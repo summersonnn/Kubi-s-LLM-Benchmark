@@ -4,11 +4,12 @@ Supports model selection by index and detailed reasoning retrieval.
 Manages API configuration via environment variables and local files.
 """
 
+import asyncio
 import os
 import time
 from typing import Any, List, Optional
 from types import SimpleNamespace
-from openai import OpenAI
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from dotenv import load_dotenv
 from utils.utils import setup_logging
@@ -59,25 +60,25 @@ class ModelAPI:
 
         # Timeout configuration
         try:
-            self.timeout = float(os.getenv("MODEL_API_TIMEOUT", "180.0"))
+            self.timeout = float(os.getenv("MODEL_API_TIMEOUT", "90.0"))
         except (ValueError, TypeError):
-            self.timeout = 180.0
+            self.timeout = 90.0
 
         # Validate required fields
         if not self.api_key:
             raise ValueError("Missing required environment variable: MODEL_API_KEY")
         
-        # Initialize OpenAI client
+        # Initialize AsyncOpenAI client
         # Clean up base_url if it ends with /api/v (some users might forget the 1)
         if self.base_url.endswith("/api/v"):
             self.base_url += "1"
             
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             base_url=self.base_url,
             api_key=self.api_key
         )
 
-    def call(
+    async def call(
         self, 
         prompt: str, 
         model_index: Optional[int] = None, 
@@ -125,77 +126,60 @@ class ModelAPI:
         temperature = kwargs.pop("temperature", self.temperature)
         timeout = kwargs.pop("timeout", self.timeout)
 
-        # Call the API with streaming and a watchdog timer
-        # We use a combined approach: SDK timeout for the header phase,
-        # and a manual watchdog for the total generation time.
-        start_time = time.time()
+        # Call the API with asyncio.wait_for to ensure strict timeout cancellation
         
-        # We need to ensure stream=True is used
-        kwargs["stream"] = True
-        # OpenRouter supports including usage in the stream
-        kwargs["stream_options"] = {"include_usage": True}
-        
-        response_stream = self.client.chat.completions.create(
-            model=selected_model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            timeout=timeout, # SDK-level timeout for the header/connection phase
-            extra_body=extra_body,
-            **kwargs
-        )
-
-        full_content = []
-        reasoning_content = []
-        usage = None
+        # We need to ensure stream=False is used
+        kwargs["stream"] = False
         
         try:
-            for chunk in response_stream:
-                # Watchdog check: total time exceeded?
-                elapsed = time.time() - start_time
-                if elapsed > timeout:
-                    logger.error("Watchdog: Total API timeout of %.2fs exceeded for model %s", timeout, selected_model)
-                    if hasattr(response_stream, 'close'):
-                        response_stream.close()
-                    raise TimeoutError(f"Total API timeout of {timeout}s exceeded")
-                
-                # Check for usage in the final chunk
-                if hasattr(chunk, 'usage') and chunk.usage:
-                    usage = chunk.usage
-                
-                if not chunk.choices:
-                    continue
-                    
-                delta = chunk.choices[0].delta
-                if hasattr(delta, 'content') and delta.content:
-                    full_content.append(delta.content)
-                
-                # Capture reasoning if present (provider dependent)
-                # Some use 'reasoning', some 'reasoning_content', etc.
-                if hasattr(delta, 'reasoning') and delta.reasoning:
-                    reasoning_content.append(delta.reasoning)
-                elif hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    reasoning_content.append(delta.reasoning_content)
+             response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=selected_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=None, # We handle timeout with asyncio.wait_for
+                    extra_body=extra_body,
+                    **kwargs
+                ),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"Model call timed out after {timeout} seconds")
 
-        except Exception as e:
-            if hasattr(response_stream, 'close'):
-                response_stream.close()
-            raise e
-            
-        # Re-assemble a compatible response object for main.py
-        content = "".join(full_content)
-        reasoning_text = "".join(reasoning_content) if reasoning_content else None
+        # Simplified handling for non-streaming response
+        # The response object is directly compatible with what main.py expects
+        # We just need to attach our custom 'reasoning_details' attribute to the message
         
-        # Build a structure that main.py expects:
+        choice = response.choices[0]
+        message = choice.message
+        
+        # Try to extract reasoning if available (provider dependent)
+        reasoning_text = None
+        if hasattr(message, "reasoning"):
+             reasoning_text = message.reasoning
+        elif hasattr(message, "reasoning_content"):
+             reasoning_text = message.reasoning_content
+             
+        # Monkey-patch the message object to include reasoning_details
+        # Use setattr to avoid type checking issues or read-only errors if it's a Pydantic model
+        # But ChatCompletionMessage is usually Pydantic. Safer to just return the response
+        # and letting the caller handle it, BUT main.py expects `message.reasoning_details`.
+        # Since response objects might be immutable, let's wrap or modify carefully.
+        # Actually, main.py expects:
         # response.choices[0].message.content
-        # response.choices[0].message.reasoning_details (using our extracted reasoning)
-        # response.usage.completion_tokens
-        # response.usage.cost
+        # response.choices[0].message.reasoning_details
         
-        # usage might be missing in some streams
+        # Let's create a SimpleNamespace wrapper if needed, or just set the attribute if allowed.
+        # OpenRouter/OpenAI Pydantic models might effectively be immutable.
+        # Safer approach: Create the mock structure we used before, but populated from the full response.
+        
+        content = message.content
+        usage = response.usage
+        
         if not usage:
             usage = SimpleNamespace(completion_tokens=0, cost=0.0)
-            
+
         mock_message = SimpleNamespace(
             content=content,
             reasoning_details=reasoning_text
@@ -207,6 +191,8 @@ class ModelAPI:
         )
         
         return mock_response
+
+
 
 if __name__ == "__main__":
     try:

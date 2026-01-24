@@ -4,6 +4,7 @@ Includes JudgeLLMEvaluator for automated assessment and HumanEvaluator for manua
 """
 
 import os
+import asyncio
 from typing import Any, Dict, Protocol
 
 from utils.cost_effective import extract_base_question_code
@@ -41,7 +42,7 @@ class JudgeLLMEvaluator:
         with open(path, "r") as f:
             return f.read().strip()
 
-    def evaluate(self, question: str, ground_truth: str, answer: str, points: int = 1) -> dict[str, Any]:
+    async def evaluate(self, question: str, ground_truth: str, answer: str, points: int = 1) -> dict[str, Any]:
         """
         Uses the judge LLM to evaluate the answer against the ground truth.
         Returns a dictionary with 'success', 'reasoning', and 'verdict'.
@@ -59,7 +60,7 @@ class JudgeLLMEvaluator:
         try:
             for attempt in range(1, max_retries + 1):
                 try:
-                    response = self.api.call(
+                    response = await self.api.call(
                         prompt=prompt,
                         model_name=self.judge_model_name,
                         max_tokens=1024,
@@ -86,8 +87,7 @@ class JudgeLLMEvaluator:
                                 "reasoning": f"Judge LLM timed out after {max_retries} attempts.",
                                 "verdict": "Error"
                             }
-                        import time
-                        time.sleep(1) # Brief pause before retry
+                        await asyncio.sleep(1) # Brief pause before retry
                     else:
                         # Non-timeout error - propagate to outer try/except
                         raise e
@@ -380,7 +380,7 @@ class VerifierEvaluator:
         module_name = os.path.splitext(os.path.basename(verifier_path))[0]
         return module_name
     
-    def evaluate(self, question_code: str, question_text: str, answer: str) -> dict[str, Any]:
+    async def evaluate(self, question_code: str, question_text: str, answer: str) -> dict[str, Any]:
         """
         Evaluates the answer based on hardcoded rules for the given question code.
         Dynamically imports the appropriate verifier script and invokes it.
@@ -412,7 +412,13 @@ class VerifierEvaluator:
                     "verdict": "Error"
                 }
             
-            is_valid, failure_reason = verifier_module.check_validity(answer)
+            # Run CPU-bound check_validity in executor
+            loop = asyncio.get_running_loop()
+            is_valid, failure_reason = await loop.run_in_executor(
+                None, 
+                verifier_module.check_validity, 
+                answer
+            )
             
             if is_valid:
                 return {
