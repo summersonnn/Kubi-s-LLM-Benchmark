@@ -384,7 +384,7 @@ def integrate_scores(session_dir: str) -> None:
         qc = impl["question_code"]
         if qc not in question_points:
             # Try to read from question file
-            from main import resolve_question_path
+            from utils.question_loader import resolve_question_path
             from utils.utils import parse_question_file
             
             path = resolve_question_path(qc)
@@ -440,7 +440,7 @@ def integrate_scores(session_dir: str) -> None:
                     all_results[question_code][model_name]["score"] = avg
         
         # Generate HTML
-        from main import generate_performance_html
+        from utils.reporting import generate_performance_html
         html_path = generate_performance_html(
             html_data["models"],
             html_data["question_codes"],
