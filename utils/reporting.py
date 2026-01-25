@@ -215,6 +215,39 @@ def write_advanced_results_file(
     return filepath
 
 
+def print_final_rankings(
+    models: List[str],
+    question_codes: List[str],
+    all_results: Dict[str, Dict[str, Any]],
+    questions_data: Dict[str, Dict[str, Any]]
+) -> None:
+    """
+    Prints the final model rankings to the console.
+    """
+    # Filter for non-human eval codes if not already filtered, but typically
+    # the caller should pass the correct list. We'll handle both cases safely.
+    non_human_eval_codes = [
+        code for code in question_codes 
+        if not questions_data.get(code, {}).get("is_manual_check", False)
+    ]
+
+    if non_human_eval_codes:
+        print("\n" + "#" * 60)
+        print("FINAL MODEL RANKINGS (Automated Evaluation)")
+        print("#" * 60)
+        
+        ranked, usage, total_possible_points = calculate_model_rankings(
+            models, non_human_eval_codes, all_results, questions_data
+        )
+        
+        for rank, (model, score) in enumerate(ranked, 1):
+            percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+            tokens, cost = usage[model]
+            print(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}")
+        print("#" * 60 + "\n")
+
+
+
 def write_results_file(
     models: List[str],
     question_codes: List[str],
