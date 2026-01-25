@@ -409,18 +409,6 @@ class BenchmarkRunner:
                     session_dir = self.human_eval.get_session_dir()
                     logger.info("\n" + "=" * 60 + "\nSPAWNING HUMAN EVALUATION SERVER")
                     
-                    # Assume script is 2 levels up from here? No, utils is 1 level deep.
-                    # This file is utils/benchmark_runner.py.
-                    # Server script is at utils/human_eval_server.py
-                    
-                    script_dir = os.path.dirname(os.path.abspath(__file__)) # utils/
-                    # We want to run it from project root generally or just be careful with paths
-                    # main.py does: script_dir = os.path.dirname(os.path.abspath(__file__)) (root)
-                    # server_script = os.path.join(script_dir, "utils", "human_eval_server.py")
-                    
-                    # Here __file__ is utils/benchmark_runner.py
-                    # os.path.dirname(__file__) is .../utils
-                    # Parent is .../
                     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                     server_script = os.path.join(project_root, "utils", "human_eval_server.py")
                     
