@@ -1,3 +1,8 @@
+"""
+Question file naming convention enforcer for the Kubis-Benchmark framework.
+Scans questions directory and renames non-conforming files to A{number}-... format.
+"""
+
 import os
 import re
 from typing import Set, List

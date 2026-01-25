@@ -60,21 +60,6 @@ def calculate_scores(manifest: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
     
     return result
 
-
-def find_latest_results_file(results_dir: str) -> str | None:
-    """Finds the most recent results file in a directory."""
-    if not os.path.exists(results_dir):
-        return None
-    
-    files = [f for f in os.listdir(results_dir) if f.startswith("benchmark_results")]
-    if not files:
-        return None
-    
-    # Sort by modification time, newest first
-    files.sort(key=lambda f: os.path.getmtime(os.path.join(results_dir, f)), reverse=True)
-    return os.path.join(results_dir, files[0])
-
-
 def update_results_file(
     filepath: str, 
     scores: Dict[str, Dict[str, float]],

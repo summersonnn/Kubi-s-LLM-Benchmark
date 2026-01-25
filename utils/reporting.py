@@ -1,7 +1,47 @@
+"""
+Benchmark reporting utilities for generating result summaries and HTML tables.
+Handles file output for standard and advanced result formats.
+"""
+
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
+
+def calculate_model_rankings(
+    models: List[str],
+    question_codes: List[str], # These should be the filtered codes (e.g. non_human_eval_codes)
+    all_results: Dict[str, Dict[str, Any]],
+    questions_data: Dict[str, Dict[str, Any]]
+) -> Tuple[List[Tuple[str, float]], Dict[str, Tuple[int, float]], float]:
+    """
+    Calculates model rankings from benchmark results.
+    Returns: (ranked_models, usage_by_model, total_possible_points)
+    """
+    scores = {}
+    usage = {} # {model: (tokens, cost)}
+    total_possible_points = 0.0
+
+    for model in models:
+        score = 0.0
+        tokens = 0
+        cost = 0.0
+        for code in question_codes:
+            model_data = all_results.get(code, {}).get(model, {})
+            score += model_data.get("score", 0.0)
+            tokens += model_data.get("total_tokens", 0)
+            cost += model_data.get("total_cost", 0.0)
+        scores[model] = score
+        usage[model] = (tokens, cost)
+
+    # Calculate total possible points
+    for code in question_codes:
+        total_possible_points += questions_data.get(code, {}).get("points", 1)
+
+    # Sort by score descending
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    
+    return ranked, usage, total_possible_points
 
 def print_benchmark_summary(models: List[str], questions_data: Dict[str, Dict[str, Any]], question_codes: List[str]) -> None:
     """
@@ -145,28 +185,10 @@ def write_advanced_results_file(
             f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
             f.write("#" * 100 + "\n\n")
             
-            # Calculate weighted scores and usage (excluding human eval questions)
-            scores = {}
-            usage = {} # {model: (tokens, cost)}
-            total_possible_points = 0
-            for model in models:
-                score = 0
-                tokens = 0
-                cost = 0.0
-                for code in non_human_eval_codes:
-                    model_data = all_results.get(code, {}).get(model, {})
-                    score += model_data.get("score", 0.0)
-                    tokens += model_data.get("total_tokens", 0)
-                    cost += model_data.get("total_cost", 0.0)
-                scores[model] = score
-                usage[model] = (tokens, cost)
-            
-            # Calculate total possible points (excluding human eval)
-            for code in non_human_eval_codes:
-                total_possible_points += questions_data.get(code, {}).get("points", 1)
-            
-            # Sort by score descending
-            ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            # Calculate rankings using helper
+            ranked, usage, total_possible_points = calculate_model_rankings(
+                models, non_human_eval_codes, all_results, questions_data
+            )
             
             for rank, (model, score) in enumerate(ranked, 1):
                 percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
@@ -278,28 +300,10 @@ def write_results_file(
             f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
             f.write("=" * 80 + "\n\n")
             
-            # Calculate weighted scores and usage (excluding human eval)
-            scores = {}
-            usage = {} # {model: (tokens, cost)}
-            total_possible_points = 0
-            for model in models:
-                score = 0
-                tokens = 0
-                cost = 0.0
-                for code in non_human_eval_codes:
-                    model_data = all_results.get(code, {}).get(model, {})
-                    score += model_data.get("score", 0.0)
-                    tokens += model_data.get("total_tokens", 0)
-                    cost += model_data.get("total_cost", 0.0)
-                scores[model] = score
-                usage[model] = (tokens, cost)
-            
-            # Calculate total possible points (excluding human eval)
-            for code in non_human_eval_codes:
-                total_possible_points += questions_data.get(code, {}).get("points", 1)
-            
-            # Sort by score descending
-            ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            # Calculate rankings using helper
+            ranked, usage, total_possible_points = calculate_model_rankings(
+                models, non_human_eval_codes, all_results, questions_data
+            )
             
             for rank, (model, score) in enumerate(ranked, 1):
                 percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0

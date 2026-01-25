@@ -1,9 +1,13 @@
+"""
+Question discovery and loading utilities for the Kubis-Benchmark framework.
+Handles question path resolution, metadata extraction, and batch loading.
+"""
+
 import os
 import glob
 import logging
 from typing import List, Dict, Tuple, Any, Optional
 
-# Import parse_question_file from utils.utils - assuming utils package is importable
 from utils.utils import parse_question_file
 
 logger = logging.getLogger(__name__)

@@ -3,8 +3,10 @@ Evaluation framework for benchmarking models.
 Includes JudgeLLMEvaluator for automated assessment and HumanEvaluator for manual review.
 """
 
+import json
 import os
 import asyncio
+import random
 from typing import Any, Dict, Protocol
 
 from utils.cost_effective import extract_base_question_code
@@ -228,7 +230,7 @@ class HumanEvaluator:
         """
         Finalizes the session by shuffling implementations and saving the manifest.
         """
-        import random
+
         
         if not self.session_dir:
             return
@@ -241,7 +243,7 @@ class HumanEvaluator:
         # Save manifest
         manifest_path = os.path.join(self.session_dir, "manifest.json")
         with open(manifest_path, "w") as f:
-            import json
+
             json.dump(self.manifest, f, indent=2)
         
         logger.info("Session finalized. %d implementations ready for evaluation.", len(impl_ids))
@@ -255,7 +257,7 @@ class HumanEvaluator:
         Updates the manifest with the paths to results files.
         This allows integrate_scores to know exactly which files to update.
         """
-        import json
+
         
         if not self.session_dir:
             return
@@ -285,7 +287,7 @@ class HumanEvaluator:
         Stores data required for HTML performance table generation.
         This allows integrate_scores to generate the table after scoring is complete.
         """
-        import json
+
         
         if not self.session_dir:
             return
@@ -307,41 +309,6 @@ class HumanEvaluator:
         
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
-
-    def load_scores(self) -> Dict[str, float]:
-        """
-        Loads scores from the manifest after human evaluation.
-        Returns a dict mapping (model_name, question_code) to average score.
-        """
-        import json
-        
-        if not self.session_dir:
-            return {}
-        
-        manifest_path = os.path.join(self.session_dir, "manifest.json")
-        if not os.path.exists(manifest_path):
-            return {}
-        
-        with open(manifest_path, "r") as f:
-            manifest = json.load(f)
-        
-        # Group scores by (model_name, question_code)
-        scores_by_key: Dict[tuple, list] = {}
-        for impl in manifest.get("implementations", []):
-            key = (impl["model_name"], impl["question_code"])
-            score = impl.get("score")
-            if score is not None:
-                if key not in scores_by_key:
-                    scores_by_key[key] = []
-                scores_by_key[key].append(score)
-        
-        # Calculate averages
-        averages = {}
-        for key, scores in scores_by_key.items():
-            if scores:
-                averages[key] = sum(scores) / len(scores)
-        
-        return averages
 
     def evaluate(self, question: str, answer: str) -> bool:
         """

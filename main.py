@@ -5,6 +5,7 @@ Parses question files, calls models via ModelAPI, and generates reports.
 
 import os
 import sys
+import re
 import argparse
 import asyncio
 from datetime import datetime
@@ -380,9 +381,6 @@ async def run_benchmark(specific_questions: List[str] | None = None) -> None:
                 
                 for r in runs:
                     reasoning = r.get("judge_reasoning", "")
-                    # Local import of re if needed for this snippet, though usually better global.
-                    # Previous code had local import inside loop. Let's keep it safe.
-                    import re
                     score_match = re.search(r'SCORE:(\d+)/(\d+)', reasoning)
                     if score_match:
                         has_granular_scores = True
