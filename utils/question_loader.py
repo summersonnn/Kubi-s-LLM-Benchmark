@@ -110,7 +110,7 @@ def discover_question_codes(specific_questions: Optional[List[str]] = None) -> L
                 questions_dir = os.path.join(PROJECT_ROOT, "questions")
                 subfolder_path = os.path.join(questions_dir, line.rstrip("/"))
                 if os.path.isdir(subfolder_path):
-                    subfolder_files = glob.glob(os.path.join(subfolder_path, "*.txt"))
+                    subfolder_files = glob.glob(os.path.join(subfolder_path, "**", "*.txt"), recursive=True)
                     for fpath in subfolder_files:
                         fname = os.path.basename(fpath)
                         # Exclude known non-question files

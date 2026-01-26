@@ -1,2 +1,5 @@
-A1
-A2
+Basic Mix/
+General Knowledge/
+Math/
+Reasoning/
+A19
