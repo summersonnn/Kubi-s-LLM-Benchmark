@@ -284,58 +284,128 @@ def main():
 
     print(f"\nProcessing {len(selected_files)} files...")
     
-    # MASTER DATA STRUCTURES
-    combined_question_codes = None
-    combined_all_results = {} # {code: {model: data}}
-    
-    file_models = {} # {filename: [models]}
+    # FIRST PASS: Parse all files
+    parsed_data = [] # List of (filename, q_codes, results, file_models)
     
     for fpath in selected_files:
         q_codes, results = parse_advanced_file(fpath)
-        
         if not q_codes:
             print(f"Skipping {os.path.basename(fpath)}: Failed to parse or empty.")
             continue
             
-        # Validation: Question sets must enable merging
-        # Optimally, they should be IDENTICAL. 
-        # But user might have run subset. 
-        # Requirement: "Even if a single question is different between benchmarks, they should not be combined."
-        # strict check:
+        # Extract models for this file
+        current_file_models = set()
+        for q in results:
+            current_file_models.update(results[q].keys())
+        current_file_models = sorted(list(current_file_models))
         
-        if combined_question_codes is None:
-            combined_question_codes = q_codes
-            # Check for dupes?
-            # q_codes = sorted(q_codes)
+        parsed_data.append({
+            "filename": os.path.basename(fpath),
+            "q_codes": q_codes,
+            "results": results,
+            "models": current_file_models,
+            "q_set": set(q_codes),
+            "m_set": set(current_file_models)
+        })
+
+    if not parsed_data:
+        print("No valid data found to process.")
+        return
+
+    # INFERENCE STEP: Determine Mode
+    # Check consistency across all parsed files against the first one
+    reference = parsed_data[0]
+    
+    all_same_questions = all(p["q_set"] == reference["q_set"] for p in parsed_data)
+    all_same_models = all(p["m_set"] == reference["m_set"] for p in parsed_data)
+    
+    combine_mode = None
+    
+    if all_same_questions and not all_same_models:
+        combine_mode = "models"
+        print(f"\nInference: Detected 'Combine MODELS' mode.")
+        print("(All files share the same Question Set, but Models differ)")
+        
+    elif all_same_models and not all_same_questions:
+        combine_mode = "questions"
+        print(f"\nInference: Detected 'Combine QUESTIONS' mode.")
+        print("(All files share the same Model Set, but Questions differ)")
+        
+    elif all_same_questions and all_same_models:
+        # Check if we are combining just 1 file?
+        if len(parsed_data) == 1:
+             print("\nNote: Only 1 file selected. Re-generating reports for this single file.")
+             combine_mode = "models" # Default fallback
         else:
-            # Compare sets
-            if set(q_codes) != set(combined_question_codes):
-                print(f"ERROR: File {os.path.basename(fpath)} has a different set of questions!")
-                print(f"Expected: {len(combined_question_codes)} questions")
-                print(f"Found:    {len(q_codes)} questions")
-                diff = set(combined_question_codes) ^ set(q_codes)
-                print(f"Difference: {list(diff)[:5]}...")
-                print("ABORTING COMBINATION.")
-                return
-
-        # Merge Results
-        filename = os.path.basename(fpath)
-        file_models[filename] = []
-        
-        for q_code, model_dict in results.items():
-            if q_code not in combined_all_results:
-                combined_all_results[q_code] = {}
+            print("\nERROR: All files appear to be IDENTICAL (Same Questions AND Same Models).")
+            print("There is nothing to merge.")
+            return
             
-            for model_name, data in model_dict.items():
-                if model_name in combined_all_results[q_code]:
-                    print(f"WARNING: Model '{model_name}' appears in multiple files! Overwriting with data from {filename}.")
-                
-                combined_all_results[q_code][model_name] = data
-                if model_name not in file_models[filename]:
-                    file_models[filename].append(model_name)
+    else:
+        # Both differ - mixed bag?
+        print("\nERROR: Incompatible files selected.")
+        print("Files must either share the EXACT SAME questions (to combine models)")
+        print("OR share the EXACT SAME models (to combine questions).")
+        print("Your selection has mixed question sets AND mixed model sets.")
+        return
 
+    # SECOND PASS: Execute Merge
+    combined_question_codes = [] 
+    combined_all_results = {} 
+    source_metadata = [] 
+
+    first_file_questions = reference["q_codes"]
+    first_file_models = reference["models"]
+    
+    # Initialize with first file data if in models mode (preserves order)
+    # Actually, let's just loop fresh to be consistent with previous logic
+    
+    for i, data in enumerate(parsed_data):
+        filename = data["filename"]
+        q_codes = data["q_codes"]
+        results = data["results"]
+        current_file_models = data["models"]
+        
+        # Metadata
+        source_metadata.append({
+            "filename": filename,
+            "models": current_file_models,
+            "questions": q_codes
+        })
+        
+        if i == 0:
+            combined_question_codes = list(q_codes)
+            combined_all_results = results
+        else:
+            if combine_mode == "models":
+                # Warn if overlap
+                if not set(current_file_models).isdisjoint(set(first_file_models)):
+                     overlap = set(current_file_models).intersection(set(first_file_models))
+                     print(f"WARNING: Models {list(overlap)} appear in both files.")
+                     print("Proceeding will overwrite earlier entries...")
+                
+                # Merge
+                for q_code, model_dict in results.items():
+                    for model_name, res in model_dict.items():
+                        combined_all_results[q_code][model_name] = res
+
+            elif combine_mode == "questions":
+                # Warn if overlap
+                if not set(q_codes).isdisjoint(set(first_file_questions)):
+                     overlap = set(q_codes).intersection(set(first_file_questions))
+                     print(f"WARNING: Questions {list(overlap)} appear in both files.")
+                     print("Proceeding will overwrite earlier entries...")
+                
+                # Merge
+                for q_code in q_codes:
+                    if q_code not in combined_all_results:
+                        combined_question_codes.append(q_code)
+                        combined_all_results[q_code] = results[q_code]
+                    else:
+                        combined_all_results[q_code].update(results[q_code])
+    
     if not combined_all_results:
-        print("No data extracted.")
+        print("No results merged.")
         return
 
     # Verify we have models
@@ -345,6 +415,7 @@ def main():
     
     all_models = sorted(list(all_models))
     print(f"\nCombined {len(all_models)} models: {', '.join(all_models)}")
+    print(f"Total Unique Questions: {len(combined_question_codes)}")
     
     # Re-hydrate Questions Data (Category, Subcategory, Points, Truth)
     print("\nLoading canonical question metadata...")
@@ -363,7 +434,9 @@ def main():
 
     # Generate Output
     print("\nGenerating Reports...")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_combined_models")
+    
+    suffix = "combined_models" if combine_mode == "models" else "combined_questions"
+    timestamp = datetime.now().strftime(f"%Y%m%d_%H%M%S_{suffix}")
     
     # 1. HTML Performance Table
     html_path = generate_performance_html(
@@ -383,7 +456,8 @@ def main():
         combined_all_results,
         questions_data,
         timestamp,
-        output_dir=os.path.join(project_root, "results")
+        output_dir=os.path.join(project_root, "results"),
+        source_metadata=source_metadata
     )
     print(f"[SUCCESS] Generated Results: {txt_path}")
 
@@ -394,7 +468,8 @@ def main():
         combined_all_results,
         questions_data,
         timestamp,
-        output_dir=os.path.join(project_root, "results_advanced")
+        output_dir=os.path.join(project_root, "results_advanced"),
+        source_metadata=source_metadata
     )
     print(f"[SUCCESS] Generated Advanced Results: {adv_path}")
     

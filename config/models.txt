@@ -25,4 +25,4 @@ mistralai/mistral-large-2512
 !qwen/qwen3-coder-30b-a3b-instruct@preset/fp8
 !qwen/qwen3-32b
 !xiaomi/mimo-v2-flash
-!google/gemma-3-27b-it
+google/gemma-3-27b-it

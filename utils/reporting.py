@@ -63,7 +63,8 @@ def write_advanced_results_file(
     all_results: Dict[str, Dict[str, Any]],
     questions_data: Dict[str, Dict[str, Any]],
     timestamp: str | None = None,
-    output_dir: str = "results_advanced"
+    output_dir: str = "results_advanced",
+    source_metadata: List[Dict[str, Any]] | None = None
 ) -> str:
     """
     Writes comprehensive advanced benchmark results to a timestamped file.
@@ -86,6 +87,24 @@ def write_advanced_results_file(
         f.write("=" * 100 + "\n\n")
         
         f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        # Source Metadata Section (if available)
+        if source_metadata:
+            f.write("COMBINATION SOURCE DETAILS:\n")
+            for idx, src in enumerate(source_metadata, 1):
+                f.write(f"{idx}. {src['filename']}\n")
+                # Format models list nicely
+                models_str = ", ".join(src['models'])
+                f.write(f"   - Models: {models_str}\n")
+                
+                # Format questions list nicely (summarize ranges if possible, but simple list for now)
+                # If too many questions, maybe abbreviate? Let's just list them.
+                q_str = ", ".join(src['questions'])
+                if len(q_str) > 100:
+                     f.write(f"   - Questions: {q_str[:97]}... ({len(src['questions'])} total)\n")
+                else:
+                     f.write(f"   - Questions: {q_str}\n")
+            f.write("\n")
         
         # Summary Section
         f.write("Models benchmarked:\n")
@@ -255,7 +274,8 @@ def write_results_file(
     all_results: Dict[str, Dict[str, Any]],
     questions_data: Dict[str, Dict[str, Any]],
     timestamp: str | None = None,
-    output_dir: str = "results"
+    output_dir: str = "results",
+    source_metadata: List[Dict[str, Any]] | None = None
 ) -> str:
     """
     Writes benchmark results to a timestamped file in the results directory.
@@ -277,6 +297,20 @@ def write_results_file(
         f.write("=" * 80 + "\n\n")
         
         f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        # Source Metadata Section (if available)
+        if source_metadata:
+            f.write("COMBINATION SOURCE DETAILS:\n")
+            for idx, src in enumerate(source_metadata, 1):
+                f.write(f"{idx}. {src['filename']}\n")
+                models_str = ", ".join(src['models'])
+                f.write(f"   - Models: {models_str}\n")
+                q_str = ", ".join(src['questions'])
+                if len(q_str) > 100:
+                     f.write(f"   - Questions: {q_str[:97]}... ({len(src['questions'])} total)\n")
+                else:
+                     f.write(f"   - Questions: {q_str}\n")
+            f.write("\n")
         
         # Summary Section
         f.write("Models benchmarked:\n")
