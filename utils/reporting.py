@@ -47,11 +47,11 @@ def print_benchmark_summary(models: List[str], questions_data: Dict[str, Dict[st
     """
     Prints the benchmark summary to the console.
     """
-    print("\nModels benchmarked:")
+    print(f"\nModels benchmarked ({len(models)}):")
     for model in models:
         print(f"- {model}")
 
-    print("\nQuestions in the run:")
+    print(f"\nQuestions in the run ({len(question_codes)}):")
     for code in question_codes:
         data = questions_data.get(code, {})
         eval_type = data.get("eval_type", "Unknown")
@@ -107,11 +107,11 @@ def write_advanced_results_file(
             f.write("\n")
         
         # Summary Section
-        f.write("Models benchmarked:\n")
+        f.write(f"Models benchmarked ({len(models)}):\n")
         for model in models:
             f.write(f"- {model}\n")
         
-        f.write("\nQuestions in the run:\n")
+        f.write(f"\nQuestions in the run ({len(question_codes)}):\n")
         for code in question_codes:
             eval_type = questions_data.get(code, {}).get("eval_type", "Unknown")
             f.write(f"- {code} ({eval_type})\n")
@@ -313,11 +313,11 @@ def write_results_file(
             f.write("\n")
         
         # Summary Section
-        f.write("Models benchmarked:\n")
+        f.write(f"Models benchmarked ({len(models)}):\n")
         for model in models:
             f.write(f"- {model}\n")
         
-        f.write("\nQuestions in the run:\n")
+        f.write(f"\nQuestions in the run ({len(question_codes)}):\n")
         for code in question_codes:
             eval_type = questions_data.get(code, {}).get("eval_type", "Unknown")
             f.write(f"- {code} ({eval_type})\n")
