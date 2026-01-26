@@ -10,7 +10,12 @@ from typing import List, Dict, Tuple, Any, Optional
 
 from utils.utils import parse_question_file
 
+from utils.utils import parse_question_file
+
 logger = logging.getLogger(__name__)
+
+# Determine project root dynamically to support running from utils/ or other subdirs
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def resolve_question_path(question_code: str) -> str | None:
     """
@@ -18,7 +23,9 @@ def resolve_question_path(question_code: str) -> str | None:
     Ensures that 'A2' does not match 'A22' by checking the character following the code.
     """
     # Search recursively in the questions directory
-    search_pattern = f"questions/**/{question_code}*.txt"
+    # Search recursively in the questions directory
+    questions_dir = os.path.join(PROJECT_ROOT, "questions")
+    search_pattern = f"{questions_dir}/**/{question_code}*.txt"
     matches = glob.glob(search_pattern, recursive=True)
 
     if not matches:
@@ -83,7 +90,7 @@ def discover_question_codes(specific_questions: Optional[List[str]] = None) -> L
         logger.info(f"Running benchmark on {len(specific_questions)} specific questions provided by system.")
         question_codes = specific_questions
     else:
-        questions_file = "config/questions.txt"
+        questions_file = os.path.join(PROJECT_ROOT, "config", "questions.txt")
         if not os.path.exists(questions_file):
             logger.error("questions.txt not found.")
             return []
@@ -100,7 +107,8 @@ def discover_question_codes(specific_questions: Optional[List[str]] = None) -> L
         for line in raw_lines:
             if line.endswith("/"):
                 # Treat as subfolder path relative to questions directory
-                subfolder_path = os.path.join("questions", line.rstrip("/"))
+                questions_dir = os.path.join(PROJECT_ROOT, "questions")
+                subfolder_path = os.path.join(questions_dir, line.rstrip("/"))
                 if os.path.isdir(subfolder_path):
                     subfolder_files = glob.glob(os.path.join(subfolder_path, "*.txt"))
                     for fpath in subfolder_files:
@@ -123,7 +131,8 @@ def discover_question_codes(specific_questions: Optional[List[str]] = None) -> L
     # Handle "ALL" keyword
     if any(line.upper() == "ALL" for line in question_codes):
         logger.info("Found 'ALL' in questions.txt. Loading all available questions...")
-        all_files = glob.glob("questions/**/*.txt", recursive=True)
+        questions_dir = os.path.join(PROJECT_ROOT, "questions")
+        all_files = glob.glob(f"{questions_dir}/**/*.txt", recursive=True)
         question_codes = []
         for fpath in all_files:
             fname = os.path.basename(fpath)
@@ -162,7 +171,7 @@ def load_questions_data(question_codes: List[str]) -> Tuple[Dict[str, Dict[str, 
     valid_question_codes = []
 
     # Load prefix for manual checks
-    prefix_file = "questions/html_css_js_questions_prefix.txt"
+    prefix_file = os.path.join(PROJECT_ROOT, "questions", "html_css_js_questions_prefix.txt")
     prefix = ""
     if os.path.exists(prefix_file):
         with open(prefix_file, "r") as f:

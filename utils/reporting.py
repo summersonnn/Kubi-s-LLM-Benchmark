@@ -62,7 +62,8 @@ def write_advanced_results_file(
     question_codes: List[str],
     all_results: Dict[str, Dict[str, Any]],
     questions_data: Dict[str, Dict[str, Any]],
-    timestamp: str | None = None
+    timestamp: str | None = None,
+    output_dir: str = "results_advanced"
 ) -> str:
     """
     Writes comprehensive advanced benchmark results to a timestamped file.
@@ -70,14 +71,13 @@ def write_advanced_results_file(
     Returns the path to the created file.
     """
     # Create results_advanced directory if it doesn't exist
-    results_dir = "results_advanced"
-    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Use provided timestamp or generate new one
     if timestamp is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"benchmark_results_advanced_{timestamp}.txt"
-    filepath = os.path.join(results_dir, filename)
+    filepath = os.path.join(output_dir, filename)
     
     with open(filepath, "w") as f:
         # Header section
@@ -149,9 +149,10 @@ def write_advanced_results_file(
                     # Model response
                     model_response = run_result.get("response", "N/A")
                     f.write("MODEL RESPONSE:\n")
-                    # Skip full response if it contains code blocks
-                    if "```" in model_response:
-                        f.write(f"[Response omitted - contains code ({len(model_response)} chars)]\n\n")
+                    # Skip full response if it contains code blocks or is too long
+                    if len(model_response) > 2000 or "```" in model_response:
+                        f.write("...\n")
+                        f.write(f"{model_response[-128:]}\n\n")
                     else:
                         f.write(f"{model_response}\n\n")
                     
@@ -253,21 +254,21 @@ def write_results_file(
     question_codes: List[str],
     all_results: Dict[str, Dict[str, Any]],
     questions_data: Dict[str, Dict[str, Any]],
-    timestamp: str | None = None
+    timestamp: str | None = None,
+    output_dir: str = "results"
 ) -> str:
     """
     Writes benchmark results to a timestamped file in the results directory.
     Returns the path to the created file.
     """
     # Create results directory if it doesn't exist
-    results_dir = "results"
-    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Use provided timestamp or generate new one
     if timestamp is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"benchmark_results_{timestamp}.txt"
-    filepath = os.path.join(results_dir, filename)
+    filepath = os.path.join(output_dir, filename)
     
     with open(filepath, "w") as f:
         # Header section
@@ -368,16 +369,16 @@ def generate_performance_html(
     question_codes: List[str],
     all_results: Dict[str, Dict[str, Any]],
     questions_data: Dict[str, Dict[str, Any]],
-    timestamp: str
+    timestamp: str,
+    output_dir: str = "results"
 ) -> str:
     """
     Generates an HTML performance table and saves it to a file.
     Returns the absolute path to the generated HTML file.
     """
-    results_dir = "results"
-    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     filename = f"performance_table_{timestamp}.html"
-    filepath = os.path.abspath(os.path.join(results_dir, filename))
+    filepath = os.path.abspath(os.path.join(output_dir, filename))
     
     # Extract short model names - strip @preset/... suffix first, then take name after provider/
     short_models = [m.split("@")[0].split("/")[-1] for m in models]
