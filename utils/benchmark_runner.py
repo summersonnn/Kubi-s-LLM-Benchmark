@@ -54,7 +54,8 @@ class BenchmarkRunner:
         question: str,
         ground_truth: Optional[str],
         points: int,
-        is_verifier_eval: bool = False
+        is_verifier_eval: bool = False,
+        is_manual_check: bool = False
     ) -> Dict[str, Any]:
         """
         Executes a single run for a model on a question and returns the result.
@@ -95,16 +96,21 @@ class BenchmarkRunner:
                 is_successful = eval_result["success"]
                 judge_reasoning = eval_result["reasoning"]
                 judge_verdict = eval_result["verdict"]
+            elif is_manual_check:
+                self.human_eval.evaluate(question, content)
+                is_successful = False
+                judge_reasoning = "Registered for Human Evaluation"
+                judge_verdict = "Pending"
             elif ground_truth:
                 eval_result = await self.judge.evaluate(question, ground_truth, content, points=points)
                 is_successful = eval_result["success"]
                 judge_reasoning = eval_result["reasoning"]
                 judge_verdict = eval_result["verdict"]
             else:
-                self.human_eval.evaluate(question, content)
+                # Should not happen if logic is correct, but fallback
                 is_successful = False
-                judge_reasoning = "Registered for Human Evaluation"
-                judge_verdict = "Pending"
+                judge_reasoning = "No Evaluation Method Found"
+                judge_verdict = "Error"
 
             return {
                 "success": is_successful,
@@ -187,11 +193,11 @@ class BenchmarkRunner:
         semaphore = asyncio.Semaphore(self.max_workers)
 
         async def run_with_semaphore(
-            model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval
+            model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval, is_manual_check
         ):
             async with semaphore:
                 return await self._process_single_run(
-                    model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval
+                    model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval, is_manual_check
                 )
 
         try:
@@ -304,7 +310,8 @@ class BenchmarkRunner:
                             question=question,
                             ground_truth=gt_for_run,
                             points=points,
-                            is_verifier_eval=questions_data[code].get("is_verifier_eval", False)
+                            is_verifier_eval=questions_data[code].get("is_verifier_eval", False),
+                            is_manual_check=questions_data[code].get("is_manual_check", False)
                         )
                         tasks.append(coroutine)
                         task_info.append((model_name, run_idx))
