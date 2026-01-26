@@ -11,7 +11,7 @@
 x-ai/grok-4.1-fast
 !moonshotai/kimi-k2-thinking
 !minimax/minimax-m2.1@preset/fp8
-!openai/gpt-oss-120b
+openai/gpt-oss-120b
 !z-ai/glm-4.7@preset/fp8-speedy
 !z-ai/glm-4.7-flash@preset/fp8-speedy
 !nvidia/nemotron-3-nano-30b-a3b@preset/fp8
