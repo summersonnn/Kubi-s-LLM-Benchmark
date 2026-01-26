@@ -8,15 +8,15 @@
 !anthropic/claude-sonnet-4.5
 !anthropic/claude-haiku-4.5
 !x-ai/grok-4
-x-ai/grok-4.1-fast
+!x-ai/grok-4.1-fast
 !moonshotai/kimi-k2-thinking
-!minimax/minimax-m2.1@preset/fp8
-openai/gpt-oss-120b
+minimax/minimax-m2.1@preset/fp8
+!openai/gpt-oss-120b
 !z-ai/glm-4.7@preset/fp8-speedy
 !z-ai/glm-4.7-flash@preset/fp8-speedy
 !nvidia/nemotron-3-nano-30b-a3b@preset/fp8
-meta-llama/llama-4-scout@preset/fp8
-!mistralai/mistral-large-2512
+!meta-llama/llama-4-scout@preset/fp8
+mistralai/mistral-large-2512
 !deepseek/deepseek-v3.2@preset/fp8
 !qwen/qwen3-235b-a22b-thinking-2507@preset/fp8
 !qwen/qwen3-max
@@ -25,4 +25,4 @@ meta-llama/llama-4-scout@preset/fp8
 !qwen/qwen3-coder-30b-a3b-instruct@preset/fp8
 !qwen/qwen3-32b
 !xiaomi/mimo-v2-flash
-!google/gemma-3-27b-it
+google/gemma-3-27b-it

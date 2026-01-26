@@ -26,8 +26,9 @@ from utils.reporting import (
     print_final_rankings
 )
 
-import logging
-logger = logging.getLogger(__name__)
+from utils.utils import setup_logging
+
+logger = setup_logging(__name__)
 
 
 class BenchmarkRunner:
@@ -135,7 +136,7 @@ class BenchmarkRunner:
 
     async def run(self, specific_questions: List[str] | None = None) -> None:
         """
-        Executes the benchmark for questions.
+        Executes the benchmark for questions using a sliding window approach.
         
         Args:
             specific_questions: If provided, runs benchmark ONLY on these question codes.
@@ -145,7 +146,6 @@ class BenchmarkRunner:
         question_codes = discover_question_codes(specific_questions)
         
         if not question_codes:
-            # Might be empty if discovery failed or user cancelled confirmation
             return
 
         # 2. Load Questions Metadata
@@ -179,13 +179,15 @@ class BenchmarkRunner:
                                 if not questions_data[c].get("is_manual_check", False)]
         sorted_question_codes = human_eval_codes + non_human_eval_codes
         
-        # Print Summary to Console (use original order for display)
+        # Print Summary to Console
         print_benchmark_summary(self.api.models, questions_data, valid_question_codes)
+
+        logger.info(f"Sliding Window execution enabled: Max workers = {self.max_workers}")
 
         # Track whether subprocess has been spawned
         human_eval_server_spawned = False
         
-        # Track exception for try/finally - ensures partial results are written on crash
+        # Track exception for try/finally
         benchmark_exception = None
         processed_any_question = False
 
@@ -200,7 +202,28 @@ class BenchmarkRunner:
                     model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval, is_manual_check
                 )
 
+        # Task Wrapper
+        async def wrapped_task(name, idx, q_code, coro):
+            try:
+                res = await coro
+                return res, name, idx, q_code, None
+            except Exception as exc:
+                return None, name, idx, q_code, exc
+
+        # Prepare ALL tasks upfront
+        all_tasks = []
+        # Keep track of expected run count per question to know when to print summary
+        # {question_code: remaining_runs}
+        runs_remaining = {code: 0 for code in valid_question_codes}
+        
+        # We also need to initialize the result structure properly for all models/questions first
+        for code in sorted_question_codes:
+            for model_name in self.api.models:
+                all_results[code][model_name] = {"runs": [], "score": 0.0}
+
         try:
+            logger.info("Initializing tasks...")
+            
             for code in sorted_question_codes:
                 data = questions_data[code]
                 question = data["question"]
@@ -208,26 +231,12 @@ class BenchmarkRunner:
                 gt_for_run = ground_truth if ground_truth != "N/A" else None
                 points = data["points"]
                 
-                logger.info("\n" + "=" * 60)
-                logger.info("PROCESSING QUESTION: %s", code)
-                logger.info("=" * 60)
-                if len(question) > 1000:
-                    logger.info("--- Question [%s] (Points: %d) ---\n[Prompt truncated - %d chars]\n-----------------\n", code, points, len(question))
-                else:
-                    logger.info("--- Question [%s] (Points: %d) ---\n%s\n-----------------\n", code, points, question)
+                # We won't log "PROCESSING QUESTION" here for every single one upfront to avoid spam,
+                # or maybe we should? The original code logged it per loop. 
+                # Let's log a brief summary or just log when we *finish* a question.
+                # Actually, logging "Queuing X..." is fine.
                 
-                if gt_for_run:
-                    logger.info("[*] Expected Ground Truth: %s\n", gt_for_run)
-
-                # Prepare tasks for this question
-                tasks = []
-                # Keep track of which model/run each task belongs to
-                # task_info[task_idx] = (model_name, run_idx)
-                task_info = []
-
                 for i, model_name in enumerate(self.api.models):
-                    all_results[code][model_name] = {"runs": [], "score": 0.0}
-                    
                     cached_impls = []
                     if self.cost_effective_enabled:
                         model_folder = find_model_folder(model_name)
@@ -239,15 +248,7 @@ class BenchmarkRunner:
                     num_cached = len(cached_impls)
                     num_to_submit = self.num_runs - num_cached
                     
-                    if num_cached > 0:
-                        logger.info(
-                            "[*] Model %s: Using %d cached + %d new runs for %s",
-                            model_name, num_cached, num_to_submit, code
-                        )
-                    else:
-                        logger.info("[*] Submitting %d runs for Model: %s...", self.num_runs, model_name)
-                    
-                    # Handle cached runs immediately
+                    # Handle cached immediately (synchronously relative to task creation)
                     for cached in cached_impls:
                         content = cached["content"]
                         is_manual = questions_data[code].get("is_manual_check", False)
@@ -266,15 +267,18 @@ class BenchmarkRunner:
                             )
                             status_log = "PENDING (Human Eval)"
                         elif questions_data[code].get("is_verifier_eval", False):
-                            # For async verification, we can wait or just run it. 
-                            # Since it's cached content, let's just await it properly here.
+                            # In sliding window, we might want to verify these async too?
+                            # For simplicity, let's keep cached as "instant" but we need to await verification if it's async
+                            # The original code awaited it.
+                            # We can't easily await inside this synchronous loop setup without making this part async.
+                            # BUT we are in an async function.
+                            
                             eval_result = await self.verifier_eval.evaluate(code, question, content)
                             is_successful = eval_result["success"]
                             judge_reasoning = f"{eval_result['reasoning']} (Cached)"
                             judge_verdict = eval_result["verdict"]
                             status_log = "PASS" if is_successful else "FAIL"
                         elif gt_for_run:
-                            # For async judge, same deal.
                             eval_result = await self.judge.evaluate(question, gt_for_run, content)
                             is_successful = eval_result["success"]
                             judge_reasoning = f"{eval_result['reasoning']} (Cached)"
@@ -296,14 +300,13 @@ class BenchmarkRunner:
                             "cost": 0.0
                         }
                         all_results[code][model_name]["runs"].append(cached_result)
-                        logger.info(
-                            "    [%s] Run (%d/%d): CACHED (from %s) - %s",
-                            model_name, cached["run_index"], self.num_runs, cached["source_file"], status_log
-                        )
-
-                    # Queue new runs
+                        # We don't increment runs_remaining for cached because they are done.
+                        # We should log them though?
+                        # logger.info(...) - maybe too verbose if many cached.
+                    
+                    # Create tasks for new runs
                     for run_idx in range(num_cached, self.num_runs):
-                        coroutine = run_with_semaphore(
+                        coro = run_with_semaphore(
                             model_name=model_name,
                             model_index=i,
                             question_code=code,
@@ -313,60 +316,28 @@ class BenchmarkRunner:
                             is_verifier_eval=questions_data[code].get("is_verifier_eval", False),
                             is_manual_check=questions_data[code].get("is_manual_check", False)
                         )
-                        tasks.append(coroutine)
-                        task_info.append((model_name, run_idx))
-
-                # Run all tasks for this question
-                if tasks:
-                    completed_counts = {model: len(all_results[code][model]["runs"]) for model in self.api.models}
-                    
-                    async def wrapped_task(name, idx, coro):
-                        try:
-                            res = await coro
-                            return res, name, idx, None
-                        except Exception as exc:
-                            return None, name, idx, exc
-
-                    wrapped_coroutines = [
-                        wrapped_task(m_name, r_idx, task) 
-                        for (m_name, r_idx), task in zip(task_info, tasks)
-                    ]
-                    
-                    for task_result in asyncio.as_completed(wrapped_coroutines):
-                        result, model_name, run_idx, error = await task_result
-                        
-                        if error:
-                            logger.error("Error collecting future for %s run %d: %s", model_name, run_idx, error)
-                        else:
-                            all_results[code][model_name]["runs"].append(result)
-                            completed_counts[model_name] += 1
-                            
-                            judge_info = result.get("judge_reasoning", "")
-                            if result.get("judge_verdict") == "Pending":
-                                status = "PENDING"
-                            elif result["success"]:
-                                status = f"PASS - {judge_info}" if judge_info else "PASS"
-                            else:
-                                status = f"FAIL - {judge_info}" if judge_info else "FAIL"
-                            
-                            logger.info("    [%s] Run (%d/%d): %s", 
-                                        model_name, completed_counts[model_name], self.num_runs, status)
-                            
-                            if questions_data[code].get("is_manual_check", False):
-                                self.human_eval.save_implementation(
-                                    model_name=model_name,
-                                    question_code=code,
-                                    run_index=run_idx,
-                                    html_content=result.get("response", ""),
-                                    max_points=points
-                                )
-                        
-                        processed_any_question = True
-
-                # Calculate scores for this question
-                logger.info("\n--- Results for Question %s ---", code)
+                        task = wrapped_task(model_name, run_idx, code, coro)
+                        all_tasks.append(task)
+                        runs_remaining[code] += 1
+            
+            logger.info(f"Queued {len(all_tasks)} total tasks across {len(sorted_question_codes)} questions.")
+            
+            # Helper to calculate and print scores for a single completed question
+            def process_completed_question(q_code):
+                points = questions_data[q_code]["points"]
+                question_text = questions_data[q_code]["question"]
+                
+                logger.info("\n" + "=" * 60)
+                logger.info("COMPLETED QUESTION: %s", q_code)
+                if len(question_text) > 200:
+                    logger.info("Content: %s...", question_text[:200].replace('\n', ' '))
+                else:
+                    logger.info("Content: %s", question_text.replace('\n', ' '))
+                
+                logger.info("--- Results for Question %s ---", q_code)
+                
                 for model_name in self.api.models:
-                    runs = all_results[code][model_name]["runs"]
+                    runs = all_results[q_code][model_name]["runs"]
                     total_tokens = sum(r.get("completion_tokens", 0) for r in runs)
                     total_cost = sum(r.get("cost", 0.0) for r in runs)
                     
@@ -388,9 +359,9 @@ class BenchmarkRunner:
                                 total_run_score += points
                     
                     score = total_run_score / self.num_runs if self.num_runs > 0 else 0
-                    all_results[code][model_name]["score"] = score
-                    all_results[code][model_name]["total_tokens"] = total_tokens
-                    all_results[code][model_name]["total_cost"] = total_cost
+                    all_results[q_code][model_name]["score"] = score
+                    all_results[q_code][model_name]["total_tokens"] = total_tokens
+                    all_results[q_code][model_name]["total_cost"] = total_cost
                     
                     if has_granular_scores:
                         run_details = []
@@ -405,16 +376,24 @@ class BenchmarkRunner:
                         success_count = sum(1 for r in runs if r.get("success", False))
                         logger.info("Model: %-30s | Score: %.2f/%d (%d/%d PASS)", 
                                     model_name, score, points, success_count, self.num_runs)
-                
-                # Subprocess spawning logic (human eval)
+                logger.info("=" * 60 + "\n")
+
+                # Handle Human Eval Server Spawning if this was the pertinent question
+                # (We still check if it's the *last* human eval code, effectively)
+                nonlocal human_eval_server_spawned
                 if (has_manual_checks 
                     and human_eval_codes 
-                    and code == human_eval_codes[-1] 
+                    and q_code == human_eval_codes[-1] 
                     and not human_eval_server_spawned):
+                    
+                    # We only spawn if ALL human eval questions are done. 
+                    # Although user might want it earlier? 
+                    # The original logic spawned when the "chunk" containing the last code finished.
+                    # Here we spawn when the last code specifically finishes.
                     
                     self.human_eval.finalize_session()
                     session_dir = self.human_eval.get_session_dir()
-                    logger.info("\n" + "=" * 60 + "\nSPAWNING HUMAN EVALUATION SERVER")
+                    logger.info("SPAWNING HUMAN EVALUATION SERVER")
                     
                     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                     server_script = os.path.join(project_root, "utils", "human_eval_server.py")
@@ -427,6 +406,59 @@ class BenchmarkRunner:
                         cwd=project_root
                     )
                     human_eval_server_spawned = True
+
+
+            # If no tasks (e.g. all cached), we still need to print summaries for questions that were fully cached
+            for code in valid_question_codes:
+                if runs_remaining[code] == 0:
+                    # Fully cached question
+                    process_completed_question(code)
+                    processed_any_question = True
+
+            # Process tasks as they complete
+            if all_tasks:
+                completed_counts = {} # (q_code, model) -> count
+                for q_code in valid_question_codes:
+                    for m_name in self.api.models:
+                         # Start with cached count
+                         completed_counts[(q_code, m_name)] = len(all_results[q_code][m_name]["runs"])
+
+                for task_result in asyncio.as_completed(all_tasks):
+                    result, model_name, run_idx, q_code, error = await task_result
+                    
+                    processed_any_question = True
+                    runs_remaining[q_code] -= 1
+                    
+                    if error:
+                        logger.error("Error collecting future for %s run %d (Q: %s): %s", model_name, run_idx, q_code, error)
+                    else:
+                        all_results[q_code][model_name]["runs"].append(result)
+                        completed_counts[(q_code, model_name)] += 1
+                        
+                        judge_info = result.get("judge_reasoning", "")
+                        if result.get("judge_verdict") == "Pending":
+                            status = "PENDING"
+                        elif result["success"]:
+                            status = f"PASS - {judge_info}" if judge_info else "PASS"
+                        else:
+                            status = f"FAIL - {judge_info}" if judge_info else "FAIL"
+                        
+                        logger.info("    [%s] Run (%d/%d) for %s: %s", 
+                                    model_name, completed_counts[(q_code, model_name)], self.num_runs, q_code, status)
+                        
+                        if questions_data[q_code].get("is_manual_check", False):
+                            self.human_eval.save_implementation(
+                                model_name=model_name,
+                                question_code=q_code,
+                                run_index=run_idx,
+                                html_content=result.get("response", ""),
+                                max_points=questions_data[q_code]["points"]
+                            )
+                    
+                    # Check if this question is now fully complete
+                    if runs_remaining[q_code] == 0:
+                        process_completed_question(q_code)
+
 
         except (Exception, KeyboardInterrupt, asyncio.CancelledError) as e:
             benchmark_exception = e
