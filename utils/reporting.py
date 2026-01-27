@@ -163,15 +163,19 @@ def write_advanced_results_file(
                     model_reasoning = run_result.get("model_reasoning")
                     if model_reasoning:
                         f.write("MODEL THINKING/REASONING:\n")
-                        f.write(f"{model_reasoning}\n\n")
+                        if len(model_reasoning) > 2048:
+                            f.write("...\n")
+                            f.write(f"{model_reasoning[-2048:]}\n\n")
+                        else:
+                            f.write(f"{model_reasoning}\n\n")
                     
                     # Model response
                     model_response = run_result.get("response", "N/A")
                     f.write("MODEL RESPONSE:\n")
                     # Skip full response if it contains code blocks or is too long
-                    if len(model_response) > 2000 or "```" in model_response:
+                    if len(model_response) > 1024 or "```" in model_response:
                         f.write("...\n")
-                        f.write(f"{model_response[-128:]}\n\n")
+                        f.write(f"{model_response[-1024:]}\n\n")
                     else:
                         f.write(f"{model_response}\n\n")
                     
