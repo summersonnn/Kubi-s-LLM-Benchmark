@@ -9,7 +9,7 @@ import sys
 import asyncio
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from openai import OpenAIError
 
@@ -65,15 +65,10 @@ class BenchmarkRunner:
             # Calculate effective max tokens based on question points
             effective_max_tokens = self.api.max_tokens * points
             
-            # Calculate dynamic timeout based on question points
-            # Base timeout is for 1 point. Scale linearly.
-            dynamic_timeout = self.api.timeout * points
-            
             response = await self.api.call(
                 question, 
                 model_index=model_index, 
-                max_tokens=effective_max_tokens,
-                timeout=dynamic_timeout
+                max_tokens=effective_max_tokens
             )
 
             # Extract content and reasoning for advanced results

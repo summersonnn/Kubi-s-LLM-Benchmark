@@ -4,13 +4,11 @@ Supports model selection by index and detailed reasoning retrieval.
 Manages API configuration via environment variables and local files.
 """
 
-import asyncio
 import os
-import time
 from typing import Any, List, Optional
 from types import SimpleNamespace
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessageParam
 from dotenv import load_dotenv
 from utils.utils import setup_logging
 
@@ -57,12 +55,6 @@ class ModelAPI:
             self.temperature = float(os.getenv("MODEL_TEMPERATURE", "0.7"))
         except (ValueError, TypeError):
             self.temperature = 0.7
-
-        # Timeout configuration
-        try:
-            self.timeout = float(os.getenv("MODEL_API_TIMEOUT", "90.0"))
-        except (ValueError, TypeError):
-            self.timeout = 90.0
 
         # Validate required fields
         if not self.api_key:
@@ -124,28 +116,19 @@ class ModelAPI:
         # Determine parameters to avoid duplicates in **kwargs
         max_tokens = kwargs.pop("max_tokens", self.max_tokens)
         temperature = kwargs.pop("temperature", self.temperature)
-        timeout = kwargs.pop("timeout", self.timeout)
-
-        # Call the API with asyncio.wait_for to ensure strict timeout cancellation
         
         # We need to ensure stream=False is used
         kwargs["stream"] = False
         
-        try:
-             response = await asyncio.wait_for(
-                self.client.chat.completions.create(
-                    model=selected_model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    timeout=None, # We handle timeout with asyncio.wait_for
-                    extra_body=extra_body,
-                    **kwargs
-                ),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            raise TimeoutError(f"Model call timed out after {timeout} seconds")
+        response = await self.client.chat.completions.create(
+            model=selected_model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=None,
+            extra_body=extra_body,
+            **kwargs
+        )
 
         # Simplified handling for non-streaming response
         # The response object is directly compatible with what main.py expects
