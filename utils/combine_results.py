@@ -441,6 +441,44 @@ def main():
         print("No valid data found to process.")
         return
 
+    # Normalize Question Codes to Base ID (to allow merging "A3" with "A3-J-...")
+    def extract_base_id(q_code: str) -> str:
+        # Extract A<number>[.<number>]
+        match = re.match(r'^(A\d+(?:\.\d+)?)', q_code)
+        if match:
+             return match.group(1)
+        return q_code
+
+    # Updates parsed_data effectively
+    for i in range(len(parsed_data)):
+        data = parsed_data[i]
+        old_results = data["results"]
+        new_results = {}
+        new_q_codes = []
+        
+        seen_base_ids = set()
+        
+        for q_code in data["q_codes"]:
+            base_id = extract_base_id(q_code)
+            
+            # Use strict ordering from file
+            if base_id not in seen_base_ids:
+                new_q_codes.append(base_id)
+                seen_base_ids.add(base_id)
+                
+            # If we somehow have duplicates (A3-v1 and A3-v2), we might overwrite or merge.
+            # For now, let's assume we overwrite (last one wins) or keep first?
+            # Existing keys in old_results are full strings.
+            # We map them to base_id.
+            if base_id in new_results:
+                 print(f"Warning: Multiple questions map to Base ID '{base_id}' in {data['filename']}. Overwriting...")
+            
+            new_results[base_id] = old_results[q_code]
+
+        data["q_codes"] = new_q_codes
+        data["results"] = new_results
+        data["q_set"] = set(new_q_codes)
+
     # INFERENCE STEP: Determine Mode
     # Check consistency across all parsed files against the first one
     reference = parsed_data[0]
