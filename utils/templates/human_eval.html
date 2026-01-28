@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -21,7 +22,7 @@
             height: 100vh;
             overflow: hidden;
         }
-        
+
         .header {
             position: fixed;
             top: 0;
@@ -36,12 +37,12 @@
             z-index: 1000;
             border-bottom: 1px solid #333;
         }
-        
+
         .progress {
             font-size: 14px;
             color: #888;
         }
-        
+
         .progress-bar {
             width: 200px;
             height: 6px;
@@ -50,18 +51,18 @@
             overflow: hidden;
             margin-left: 15px;
         }
-        
+
         .progress-fill {
             height: 100%;
             background: linear-gradient(90deg, #00d2ff, #3a7bd5);
             transition: width 0.3s ease;
         }
-        
+
         .hint {
             font-size: 12px;
             color: #666;
         }
-        
+
         .iframe-container {
             position: fixed;
             top: 50px;
@@ -183,7 +184,7 @@
             background: #1e1e1e;
             padding: 16px 20px;
         }
-        
+
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -196,11 +197,11 @@
             justify-content: center;
             z-index: 2000;
         }
-        
+
         .modal-overlay.active {
             display: flex;
         }
-        
+
         .modal {
             background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
             padding: 40px 50px;
@@ -209,13 +210,13 @@
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
             border: 1px solid #444;
         }
-        
+
         .modal h2 {
             margin-bottom: 25px;
             font-weight: 400;
             font-size: 24px;
         }
-        
+
         .score-input {
             width: 120px;
             padding: 15px;
@@ -228,17 +229,17 @@
             outline: none;
             transition: border-color 0.2s;
         }
-        
+
         .score-input:focus {
             border-color: #3a7bd5;
         }
-        
+
         .score-hint {
             margin-top: 15px;
             font-size: 13px;
             color: #666;
         }
-        
+
         .btn {
             margin-top: 25px;
             padding: 12px 40px;
@@ -250,27 +251,28 @@
             cursor: pointer;
             transition: transform 0.1s, box-shadow 0.2s;
         }
-        
+
         .btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 20px rgba(58, 123, 213, 0.4);
         }
-        
+
         .complete-modal {
             max-width: 500px;
         }
-        
+
         .complete-modal h2 {
             font-size: 28px;
             margin-bottom: 20px;
         }
-        
+
         .complete-modal p {
             color: #aaa;
             line-height: 1.6;
         }
     </style>
 </head>
+
 <body>
     <div class="header">
         <div style="display: flex; align-items: center;">
@@ -281,7 +283,7 @@
         </div>
         <span class="hint">Press <kbd>Space</kbd> + <kbd>0</kbd> to score</span>
     </div>
-    
+
     <div class="iframe-container" id="iframeContainer">
         <iframe id="implFrame" src="about:blank"></iframe>
     </div>
@@ -305,13 +307,14 @@
             <button class="btn" id="nextBtn">Next</button>
         </div>
     </div>
-    
+
     <div class="modal-overlay" id="completeModal">
         <div class="modal complete-modal">
             <h2>Evaluation Complete</h2>
             <p>All implementations have been scored. The results have been saved.</p>
             <p style="margin-top: 15px;">You may now close this browser tab.</p>
-            <p style="margin-top: 10px; font-size: 12px; color: #666;">(Or press Ctrl+C in the terminal to stop the server)</p>
+            <p style="margin-top: 10px; font-size: 12px; color: #666;">(Or press Ctrl+C in the terminal to stop the
+                server)</p>
         </div>
     </div>
 
@@ -348,13 +351,13 @@
                 is_leetcode: isLeetcode,
                 max_points: data.max_points || 1
             };
-            
+
             // Update score input constraints based on max_points
             const scoreInput = document.getElementById('scoreInput');
             scoreInput.min = 0;
             scoreInput.max = currentImpl.max_points;
             scoreInput.placeholder = '0-' + currentImpl.max_points;
-            document.getElementById('scoreHint').textContent = 
+            document.getElementById('scoreHint').textContent =
                 'Enter a score from 0 to ' + currentImpl.max_points + ' (absolute points)';
             totalImpls = data.total;
             scoredCount = data.scored;
@@ -395,7 +398,7 @@
 
             updateProgress(data.index + 1, data.total);
         }
-        
+
         function updateProgress(current, total) {
             document.getElementById('progressText').textContent = `${current} / ${total}`;
             document.getElementById('progressFill').style.width = `${((current - 1) / total) * 100}%`;
@@ -485,32 +488,32 @@
             // Generate line numbers
             const lines = code.split('\\n');
             const lineNumbersEl = document.getElementById('lineNumbers');
-            lineNumbersEl.innerHTML = lines.map(function(_, i) {
+            lineNumbersEl.innerHTML = lines.map(function (_, i) {
                 return '<span>' + (i + 1) + '</span>';
             }).join('');
             console.log('Line numbers generated:', lines.length, 'lines');
         }
-        
+
         function openScoreModal() {
             document.getElementById('scoreModal').classList.add('active');
             document.getElementById('scoreInput').value = '';
             document.getElementById('scoreInput').focus();
         }
-        
+
         function closeScoreModal() {
             document.getElementById('scoreModal').classList.remove('active');
         }
-        
+
         async function submitScore() {
             const input = document.getElementById('scoreInput');
             const score = parseFloat(input.value);
-            
+
             const maxPoints = currentImpl ? currentImpl.max_points : 10;
             if (isNaN(score) || score < 0 || score > maxPoints) {
                 input.style.borderColor = '#ff4444';
                 return;
             }
-            
+
             // Submit score for current implementation
             await fetch('/api/score', {
                 method: 'POST',
@@ -520,17 +523,17 @@
                     score: score
                 })
             });
-            
+
             closeScoreModal();
-            
+
             // Get next implementation
             await loadNext();
         }
-        
+
         function showComplete() {
             document.getElementById('completeModal').classList.add('active');
         }
-        
+
         async function reloadCurrentImpl() {
             // Reload current implementation
             if (currentImpl) {
@@ -581,44 +584,44 @@
                 document.body.removeChild(textarea);
             });
         }
-        
+
         // Key event handling - using window level to capture even when iframe has focus
         window.addEventListener('keydown', (e) => {
             if (e.code === 'Space') {
                 spacePressed = true;
             }
-            
+
             // Support both regular 0 and Numpad 0
             if (spacePressed && (e.code === 'Digit0' || e.code === 'Numpad0')) {
                 e.preventDefault();
                 openScoreModal();
             }
-            
-            // R to reset/reload current implementation (both regular and when Space not pressed)
-            if ((e.code === 'KeyR') && !document.getElementById('scoreModal').classList.contains('active')) {
+
+            // < to reset/reload current implementation (both regular and when Space not pressed)
+            if ((e.code === 'Comma') && !document.getElementById('scoreModal').classList.contains('active')) {
                 e.preventDefault();
                 reloadCurrentImpl();
             }
-            
+
             // Enter to submit in modal
             if ((e.code === 'Enter' || e.code === 'NumpadEnter') && document.getElementById('scoreModal').classList.contains('active')) {
                 e.preventDefault();
                 submitScore();
             }
-            
+
             // Escape to close score modal without submitting
             if (e.code === 'Escape' && document.getElementById('scoreModal').classList.contains('active')) {
                 e.preventDefault();
                 closeScoreModal();
             }
         }, true); // Use capture phase to get events before iframe
-        
+
         window.addEventListener('keyup', (e) => {
             if (e.code === 'Space') {
                 spacePressed = false;
             }
         }, true);
-        
+
         // Also listen on iframe for focus restoration
         document.getElementById('implFrame').addEventListener('load', () => {
             try {
@@ -632,7 +635,7 @@
                         e.preventDefault();
                         openScoreModal();
                     }
-                    if (e.code === 'KeyR') {
+                    if (e.code === 'Comma') {
                         e.preventDefault();
                         reloadCurrentImpl();
                     }
@@ -646,11 +649,12 @@
                 // Cross-origin iframe, can't add listeners
             }
         });
-        
+
         document.getElementById('nextBtn').addEventListener('click', submitScore);
         document.getElementById('copyBtn').addEventListener('click', copyCode);
 
         init();
     </script>
 </body>
+
 </html>
