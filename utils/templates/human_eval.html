@@ -349,8 +349,14 @@
                 id: data.impl_id,
                 filename: data.filename,
                 is_leetcode: isLeetcode,
-                max_points: data.max_points || 1
+                max_points: data.max_points || 1,
+                question_code: data.question_code || 'Unknown'
             };
+
+            // Log which question is being evaluated
+            console.log('─────────────────────────────────────────');
+            console.log('User is evaluating the question:', currentImpl.question_code, '(Implementation:', currentImpl.id + ')');
+            console.log('─────────────────────────────────────────');
 
             // Update score input constraints based on max_points
             const scoreInput = document.getElementById('scoreInput');
@@ -597,8 +603,8 @@
                 openScoreModal();
             }
 
-            // < to reset/reload current implementation (both regular and when Space not pressed)
-            if ((e.code === 'Comma') && !document.getElementById('scoreModal').classList.contains('active')) {
+            // 1 to reset/reload current implementation (both regular and when Space not pressed)
+            if ((e.code === 'Digit1') && !document.getElementById('scoreModal').classList.contains('active')) {
                 e.preventDefault();
                 reloadCurrentImpl();
             }
@@ -635,7 +641,7 @@
                         e.preventDefault();
                         openScoreModal();
                     }
-                    if (e.code === 'Comma') {
+                    if (e.code === 'Digit1') {
                         e.preventDefault();
                         reloadCurrentImpl();
                     }

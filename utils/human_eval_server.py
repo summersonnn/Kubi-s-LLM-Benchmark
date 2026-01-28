@@ -70,39 +70,57 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
             self.wfile.write(EVALUATION_HTML.encode())
 
         elif parsed.path == "/api/next":
-            # Atomically claim the next implementation
+            # Atomically claim the next unscored implementation
             with EvaluationHandler.queue_lock:
                 manifest_path = os.path.join(EvaluationHandler.session_dir, "manifest.json")
                 with open(manifest_path, "r") as f:
                     manifest = json.load(f)
                 
                 shuffled_order = manifest["shuffled_order"]
+                implementations = {impl["id"]: impl for impl in manifest["implementations"]}
                 total = len(shuffled_order)
                 
-                if EvaluationHandler.queue_index >= total:
-                    # No more implementations
-                    response = {"done": True, "total": total, "scored": total}
-                else:
+                # Find next unscored implementation starting from queue_index
+                impl = None
+                current_idx = None
+                while EvaluationHandler.queue_index < total:
                     impl_id = shuffled_order[EvaluationHandler.queue_index]
-                    impl = next(i for i in manifest["implementations"] if i["id"] == impl_id)
-                    current_idx = EvaluationHandler.queue_index
+                    candidate = implementations[impl_id]
+                    if candidate.get("score") is None:
+                        # Found an unscored implementation
+                        impl = candidate
+                        current_idx = EvaluationHandler.queue_index
+                        EvaluationHandler.queue_index += 1
+                        break
+                    # Skip already-scored implementations
                     EvaluationHandler.queue_index += 1
-
+                
+                if impl is None:
+                    # No more unscored implementations
+                    scored = sum(1 for i in manifest["implementations"] if i.get("score") is not None)
+                    response = {"done": True, "total": total, "scored": scored}
+                else:
                     # Count scored so far
                     scored = sum(1 for i in manifest["implementations"] if i.get("score") is not None)
 
                     # Detect LeetCode by filename extension as fallback for old manifests
                     is_leetcode = impl.get("is_leetcode", impl["filename"].endswith(".txt"))
 
+                    question_code = impl.get("question_code", "Unknown")
+                    
+                    # Log to terminal which question is being evaluated
+                    print(f"User is evaluating the question: {question_code} (Implementation: {impl['id']})")
+
                     response = {
                         "done": False,
-                        "impl_id": impl_id,
+                        "impl_id": impl["id"],
                         "filename": impl["filename"],
                         "index": current_idx,
                         "total": total,
                         "scored": scored,
                         "is_leetcode": is_leetcode,
-                        "max_points": impl.get("max_points", 1)
+                        "max_points": impl.get("max_points", 1),
+                        "question_code": question_code
                     }
             
             self.send_response(200)
