@@ -1,6 +1,6 @@
 """
 Cost-effective caching utilities for reusing existing model implementations.
-Scans the cost-effective folder for pre-generated HTML files to avoid redundant API calls.
+Scans the cost-effective folder for pre-generated Python code files to avoid redundant API calls.
 """
 
 import os
@@ -67,8 +67,8 @@ def get_existing_implementations(
 ) -> list[dict[str, Any]]:
     """
     Retrieves existing implementations for a question from the cache folder.
-    Files must follow the pattern: {question_code}-{run_index}.{ext} (e.g., A43-1.html, A68-1.txt)
-    Supported extensions: .html, .txt, .md
+    Files must follow the pattern: {question_code}-{run_index}.{ext} (e.g., A43-1.txt, A68-1.md)
+    Supported extensions: .txt, .md
     
     Args:
         model_folder: Path to the model's cache folder
@@ -85,8 +85,8 @@ def get_existing_implementations(
     # Extract base question code (e.g., 'A17' from 'A17-line-liars')
     base_code = extract_base_question_code(question_code)
     
-    # Pattern: QuestionCode-RunIndex.(html|txt|md) (1-indexed)
-    pattern = re.compile(rf"^{re.escape(base_code)}-(\d+)\.(html|txt|md)$", re.IGNORECASE)
+    # Pattern: QuestionCode-RunIndex.(txt|md) (1-indexed)
+    pattern = re.compile(rf"^{re.escape(base_code)}-(\d+)\.(txt|md)$", re.IGNORECASE)
     
     implementations = []
     

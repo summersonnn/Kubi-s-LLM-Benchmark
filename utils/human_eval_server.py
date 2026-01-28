@@ -1,6 +1,6 @@
 """
-HTTP server for blind human evaluation of HTML/CSS/JS implementations.
-Serves shuffled implementations via iframe and collects scores without revealing model origins.
+HTTP server for blind human evaluation of Python code implementations.
+Serves shuffled implementations and collects scores without revealing model origins.
 """
 
 import argparse
@@ -11,7 +11,7 @@ import threading
 import time
 import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 # Load HTML template
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "human_eval.html")
@@ -103,9 +103,6 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
                     # Count scored so far
                     scored = sum(1 for i in manifest["implementations"] if i.get("score") is not None)
 
-                    # Detect LeetCode by filename extension as fallback for old manifests
-                    is_leetcode = impl.get("is_leetcode", impl["filename"].endswith(".txt"))
-
                     question_code = impl.get("question_code", "Unknown")
                     
                     # Log to terminal which question is being evaluated
@@ -118,7 +115,6 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
                         "index": current_idx,
                         "total": total,
                         "scored": scored,
-                        "is_leetcode": is_leetcode,
                         "max_points": impl.get("max_points", 1),
                         "question_code": question_code
                     }
@@ -163,11 +159,8 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
                     content = extracted_code
                 
                 self.send_response(200)
-                # Determine content type based on file extension
-                if filename.endswith(".txt"):
-                    self.send_header("Content-type", "text/plain; charset=utf-8")
-                else:
-                    self.send_header("Content-type", "text/html")
+                # All implementations are text/plain (Python code)
+                self.send_header("Content-type", "text/plain; charset=utf-8")
                 self.end_headers()
                 self.wfile.write(content.encode())
             else:
@@ -285,7 +278,7 @@ def run_server(session_dir: str, port: int = 8765, num_parallel: int = 1, auto_i
         print(f"Open in browser: http://localhost:{port}")
     else:
         print(f"Parallel evaluation mode: {num_parallel} windows")
-        print(f"All windows share a common work queue")
+        print("All windows share a common work queue")
     
     print("Press Ctrl+C to stop the server after evaluation is complete.")
     print(f"{'=' * 60}\n")
@@ -328,7 +321,7 @@ def run_server(session_dir: str, port: int = 8765, num_parallel: int = 1, auto_i
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Human evaluation server for blind HTML/CSS/JS implementation scoring"
+        description="Human evaluation server for blind Python code implementation scoring"
     )
     parser.add_argument(
         "session_dir",

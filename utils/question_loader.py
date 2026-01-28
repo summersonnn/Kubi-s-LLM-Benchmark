@@ -10,7 +10,6 @@ from typing import List, Dict, Tuple, Any, Optional
 
 from utils.utils import parse_question_file
 
-from utils.utils import parse_question_file
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +113,7 @@ def discover_question_codes(specific_questions: Optional[List[str]] = None) -> L
                     for fpath in subfolder_files:
                         fname = os.path.basename(fpath)
                         # Exclude known non-question files
-                        if fname in ["html_css_js_questions_prefix.txt", "readme.txt", "README.txt"]:
+                        if fname in ["readme.txt", "README.txt"]:
                             continue
                         code = os.path.splitext(fname)[0]
                         question_codes.append(code)
@@ -137,7 +136,7 @@ def discover_question_codes(specific_questions: Optional[List[str]] = None) -> L
         for fpath in all_files:
             fname = os.path.basename(fpath)
             # Filter out exclude files
-            if fname in ["html_css_js_questions_prefix.txt", "readme.txt", "README.txt"]:
+            if fname in ["readme.txt", "README.txt"]:
                 continue
             
             # Use filename without extension as the code
@@ -170,15 +169,6 @@ def load_questions_data(question_codes: List[str]) -> Tuple[Dict[str, Dict[str, 
     questions_data: Dict[str, Dict[str, Any]] = {}
     valid_question_codes = []
 
-    # Load prefix for manual checks
-    prefix_file = os.path.join(PROJECT_ROOT, "questions", "html_css_js_questions_prefix.txt")
-    prefix = ""
-    if os.path.exists(prefix_file):
-        with open(prefix_file, "r") as f:
-            prefix = f.read().strip()
-    else:
-        logger.warning("Prefix file %s not found.", prefix_file)
-
     logger.info("Loading questions...")
 
     for code in question_codes:
@@ -196,13 +186,10 @@ def load_questions_data(question_codes: List[str]) -> Tuple[Dict[str, Dict[str, 
 
         question, ground_truth, points = parse_question_file(file_content)
 
-        # Prepend prefix if question requires human eval (except Leetcode questions)
+        # Determine evaluation type from filename markers
         question_basename = os.path.basename(question_path)
         is_human_eval = "-H-" in question_basename
         is_verifier_eval = "-V-" in question_basename
-        is_leetcode = "Leetcode" in question_basename
-        if is_human_eval and not is_leetcode:
-            question = f"{prefix}\n\n{question}"
 
         # Determine Evaluation Type
         if is_human_eval:
