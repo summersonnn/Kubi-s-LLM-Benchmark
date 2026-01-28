@@ -181,6 +181,7 @@ class BenchmarkRunner:
 
         # Track whether subprocess has been spawned
         human_eval_server_spawned = False
+        human_eval_remaining = len(human_eval_codes)
         
         # Track exception for try/finally
         benchmark_exception = None
@@ -373,12 +374,13 @@ class BenchmarkRunner:
                                     model_name, score, points, success_count, self.num_runs)
                 logger.info("=" * 60 + "\n")
 
-                # Handle Human Eval Server Spawning if this was the pertinent question
-                # (We still check if it's the *last* human eval code, effectively)
-                nonlocal human_eval_server_spawned
+                nonlocal human_eval_server_spawned, human_eval_remaining
                 if (has_manual_checks 
-                    and human_eval_codes 
-                    and q_code == human_eval_codes[-1] 
+                    and q_code in human_eval_codes):
+                    human_eval_remaining -= 1
+                    
+                if (has_manual_checks 
+                    and human_eval_remaining == 0 
                     and not human_eval_server_spawned):
                     
                     # We only spawn if ALL human eval questions are done. 

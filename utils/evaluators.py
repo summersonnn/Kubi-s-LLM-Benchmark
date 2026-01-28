@@ -195,25 +195,68 @@ class HumanEvaluator:
 
     def finalize_session(self) -> None:
         """
-        Finalizes the session by shuffling implementations and saving the manifest.
+        Finalizes the session by organizing implementations and saving the manifest.
+        Groups implementations so that:
+        1. All runs of the same question are consecutive
+        2. All LeetCode questions are grouped together, followed by other questions
         """
-
-        
         if not self.session_dir:
             return
         
-        # Create shuffled order
-        impl_ids = [impl["id"] for impl in self.manifest["implementations"]]
-        random.shuffle(impl_ids)
+        # Separate implementations by question type
+        leetcode_impls = []
+        other_impls = []
+        
+        for impl in self.manifest["implementations"]:
+            if impl["is_leetcode"]:
+                leetcode_impls.append(impl)
+            else:
+                other_impls.append(impl)
+        
+        # Group implementations by question_code within each type
+        def group_by_question(impls: list) -> list:
+            """Groups implementations by question_code, shuffles questions, keeps runs together."""
+            from collections import defaultdict
+            
+            question_groups = defaultdict(list)
+            for impl in impls:
+                question_groups[impl["question_code"]].append(impl)
+            
+            # Sort runs within each question by run_index for consistency
+            for question_code in question_groups:
+                question_groups[question_code].sort(key=lambda x: x["run_index"])
+            
+            # Shuffle the order of questions
+            question_codes = list(question_groups.keys())
+            random.shuffle(question_codes)
+            
+            # Flatten: all runs of Q1, then all runs of Q2, etc.
+            ordered_impls = []
+            for question_code in question_codes:
+                ordered_impls.extend(question_groups[question_code])
+            
+            return ordered_impls
+        
+        # Apply grouping to both types
+        ordered_leetcode = group_by_question(leetcode_impls)
+        ordered_others = group_by_question(other_impls)
+        
+        # Combine: LeetCode questions first, then others
+        ordered_impls = ordered_leetcode + ordered_others
+        
+        # Extract ordered IDs
+        impl_ids = [impl["id"] for impl in ordered_impls]
         self.manifest["shuffled_order"] = impl_ids
         
         # Save manifest
         manifest_path = os.path.join(self.session_dir, "manifest.json")
         with open(manifest_path, "w") as f:
-
             json.dump(self.manifest, f, indent=2)
         
         logger.info("Session finalized. %d implementations ready for evaluation.", len(impl_ids))
+        logger.info("Order: %d LeetCode questions, %d other questions", 
+                   len(set(impl["question_code"] for impl in ordered_leetcode)),
+                   len(set(impl["question_code"] for impl in ordered_others)))
 
     def get_session_dir(self) -> str | None:
         """Returns the current session directory path."""
