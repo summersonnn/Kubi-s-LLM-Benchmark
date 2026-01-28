@@ -16,7 +16,6 @@ from openai import OpenAIError
 from utils.model_api import ModelAPI
 from utils.utils import kill_process_on_port
 from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, VerifierEvaluator
-from utils.cost_effective import find_model_folder, get_existing_implementations
 from utils.question_loader import discover_question_codes, load_questions_data
 from utils.reporting import (
     print_benchmark_summary,
@@ -34,7 +33,6 @@ logger = setup_logging(__name__)
 class BenchmarkRunner:
     def __init__(self):
         self.num_runs = int(os.getenv("NUM_RUNS", "4"))
-        self.cost_effective_enabled = os.getenv("COST_EFFECTIVE_ENABLED", "true").lower() in ("true", "1", "yes")
         self.max_workers = int(os.getenv("MAX_WORKERS", "28"))
         
         # Initialize components
@@ -232,76 +230,10 @@ class BenchmarkRunner:
                 # Let's log a brief summary or just log when we *finish* a question.
                 # Actually, logging "Queuing X..." is fine.
                 
+                
                 for i, model_name in enumerate(self.api.models):
-                    cached_impls = []
-                    if self.cost_effective_enabled:
-                        model_folder = find_model_folder(model_name)
-                        if model_folder:
-                            cached_impls = get_existing_implementations(
-                                model_folder, code, self.num_runs
-                            )
-                    
-                    num_cached = len(cached_impls)
-                    num_to_submit = self.num_runs - num_cached
-                    
-                    # Handle cached immediately (synchronously relative to task creation)
-                    for cached in cached_impls:
-                        content = cached["content"]
-                        is_manual = questions_data[code].get("is_manual_check", False)
-                        status_log = "UNKNOWN"
-                        
-                        if is_manual:
-                            judge_reasoning = "Loaded from cost-effective cache"
-                            judge_verdict = "Pending"
-                            is_successful = False
-                            self.human_eval.save_implementation(
-                                model_name=model_name,
-                                question_code=code,
-                                run_index=cached["run_index"] - 1,
-                                html_content=content,
-                                max_points=points
-                            )
-                            status_log = "PENDING (Human Eval)"
-                        elif questions_data[code].get("is_verifier_eval", False):
-                            # In sliding window, we might want to verify these async too?
-                            # For simplicity, let's keep cached as "instant" but we need to await verification if it's async
-                            # The original code awaited it.
-                            # We can't easily await inside this synchronous loop setup without making this part async.
-                            # BUT we are in an async function.
-                            
-                            eval_result = await self.verifier_eval.evaluate(code, question, content)
-                            is_successful = eval_result["success"]
-                            judge_reasoning = f"{eval_result['reasoning']} (Cached)"
-                            judge_verdict = eval_result["verdict"]
-                            status_log = "PASS" if is_successful else "FAIL"
-                        elif gt_for_run:
-                            eval_result = await self.judge.evaluate(question, gt_for_run, content)
-                            is_successful = eval_result["success"]
-                            judge_reasoning = f"{eval_result['reasoning']} (Cached)"
-                            judge_verdict = eval_result["verdict"]
-                            status_log = "PASS" if is_successful else "FAIL"
-                        else:
-                            is_successful = False
-                            judge_reasoning = "No Ground Truth - Cached"
-                            judge_verdict = "Unknown"
-                            status_log = "FAIL"
-
-                        cached_result = {
-                            "success": is_successful,
-                            "response": content,
-                            "model_reasoning": None,
-                            "judge_reasoning": judge_reasoning,
-                            "judge_verdict": judge_verdict,
-                            "completion_tokens": 0,
-                            "cost": 0.0
-                        }
-                        all_results[code][model_name]["runs"].append(cached_result)
-                        # We don't increment runs_remaining for cached because they are done.
-                        # We should log them though?
-                        # logger.info(...) - maybe too verbose if many cached.
-                    
-                    # Create tasks for new runs
-                    for run_idx in range(num_cached, self.num_runs):
+                    # Create tasks for all runs
+                    for run_idx in range(self.num_runs):
                         coro = run_with_semaphore(
                             model_name=model_name,
                             model_index=i,
@@ -405,20 +337,12 @@ class BenchmarkRunner:
                     human_eval_server_spawned = True
 
 
-            # If no tasks (e.g. all cached), we still need to print summaries for questions that were fully cached
-            for code in valid_question_codes:
-                if runs_remaining[code] == 0:
-                    # Fully cached question
-                    process_completed_question(code)
-                    processed_any_question = True
-
             # Process tasks as they complete
             if all_tasks:
                 completed_counts = {} # (q_code, model) -> count
                 for q_code in valid_question_codes:
                     for m_name in self.api.models:
-                         # Start with cached count
-                         completed_counts[(q_code, m_name)] = len(all_results[q_code][m_name]["runs"])
+                         completed_counts[(q_code, m_name)] = 0
 
                 for task_result in asyncio.as_completed(all_tasks):
                     result, model_name, run_idx, q_code, error = await task_result

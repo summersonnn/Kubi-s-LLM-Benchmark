@@ -9,9 +9,8 @@ import asyncio
 import random
 from typing import Any, Dict, Protocol
 
-from utils.cost_effective import extract_base_question_code
+from utils.utils import setup_logging, extract_base_question_code
 from utils.model_api import ModelAPI
-from utils.utils import setup_logging
 
 logger = setup_logging(__name__)
 

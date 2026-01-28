@@ -9,7 +9,7 @@ import re
 import subprocess
 import os
 import shutil
-from typing import Tuple, Optional
+from typing import Tuple
 
 def setup_logging(name: str | None = None) -> logging.Logger:
     """
@@ -56,13 +56,7 @@ def parse_question_file(content: str) -> Tuple[str, str, int]:
         question = content[:match.start()].strip()
         metadata_section = content[match.end():].strip()
         
-        # Parse metadata
-        # Ground Truth
-        gt_pattern = re.compile(r"Ground\s+Truth\s*:\s*(.*?)(?:\n\s*(?:Point|[^:]+):|$)", re.IGNORECASE | re.DOTALL)
-        # Note: The above regex for GT is slightly risky if GT is multi-line. 
-        # Let's use a simpler approach: strict parsing of known keys or just finding them.
-        
-        # Actually, let's keep it robust.
+        # Parse metadata - extract Ground Truth
         # Find "Ground Truth:"
         gt_start = re.search(r"Ground\s+Truth\s*:\s*", metadata_section, re.IGNORECASE)
         if gt_start:
@@ -132,6 +126,23 @@ def parse_question_file(content: str) -> Tuple[str, str, int]:
                 points = 1
         
     return question, ground_truth, points
+
+
+def extract_base_question_code(question_code: str) -> str:
+    """
+    Extracts the base question code (e.g., 'A17' or 'A23.1') from a full question code
+    that may include descriptive suffixes (e.g., 'A17-line-liars' or 'A23.1-some-name').
+    
+    Args:
+        question_code: Full question code potentially with suffix
+        
+    Returns:
+        Base question code (A<number> or A<number>.<subnumber>), or original if no match.
+    """
+    match = re.match(r"^(A\d+(?:\.\d+)?)", question_code, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return question_code
 
 
 def kill_process_on_port(port: int) -> None:
