@@ -443,17 +443,12 @@
 
             console.log('Found', blocks.length, 'code blocks');
 
-            // Use the largest code block found
+            // Use the last code block found
             if (blocks.length > 0) {
-                let largest = blocks[0];
-                for (const block of blocks) {
-                    if (block.code.length > largest.code.length) {
-                        largest = block;
-                    }
-                }
-                code = largest.code.trim();
-                detectedLang = largest.lang.toLowerCase() || 'python';
-                console.log('Using largest block, lang:', detectedLang, 'length:', code.length);
+                let lastBlock = blocks[blocks.length - 1];
+                code = lastBlock.code.trim();
+                detectedLang = lastBlock.lang.toLowerCase() || 'python';
+                console.log('Using last block, lang:', detectedLang, 'length:', code.length);
             } else {
                 // Fallback: if no code blocks found, try to find class/def pattern
                 const classMatch = text.match(/^(class\\s+\\w+[\\s\\S]*)/m);

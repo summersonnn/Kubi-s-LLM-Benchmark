@@ -1,2 +1,5 @@
-Coding/Leetcode/
-Coding/Single HTML Generation/
+Basic Mix/
+General Knowledge/
+Math/
+Reasoning/
+A19

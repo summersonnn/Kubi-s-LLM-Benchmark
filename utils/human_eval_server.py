@@ -150,6 +150,18 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
             if os.path.exists(filepath):
                 with open(filepath, "r") as f:
                     content = f.read()
+                
+                # Extract last code block if file contains markdown fences
+                import re
+                code_block_pattern = r'```(\w*)\s*\n?([\s\S]*?)```'
+                matches = list(re.finditer(code_block_pattern, content))
+                
+                if matches:
+                    # Use the last code block found
+                    last_match = matches[-1]
+                    extracted_code = last_match.group(2).strip()
+                    content = extracted_code
+                
                 self.send_response(200)
                 # Determine content type based on file extension
                 if filename.endswith(".txt"):
@@ -163,6 +175,7 @@ class EvaluationHandler(SimpleHTTPRequestHandler):
 
         else:
             self.send_error(404, "Not found")
+
 
     def do_POST(self):
         parsed = urlparse(self.path)
