@@ -54,18 +54,123 @@ def clean_ansi(text: str) -> str:
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
     return ansi_escape.sub('', text)
 
-def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+def parse_human_eval_addendum(content: str) -> Dict[str, Dict[str, float]]:
+    """
+    Parses the Human Evaluation Addendum section to extract final human eval scores.
+    
+    Returns:
+        scores: {question_code: {model_name: score}}
+    """
+    scores: Dict[str, Dict[str, float]] = {}
+    
+    # Find the Human Evaluation Addendum section
+    addendum_match = re.search(
+        r'={60,}\nHUMAN EVALUATION ADDENDUM \([^)]+\)\n={60,}\n(.*?)(?:={60,}|$)',
+        content,
+        re.DOTALL
+    )
+    
+    if not addendum_match:
+        return scores
+    
+    addendum_text = addendum_match.group(1)
+    
+    # Parse each question block
+    # Format:
+    # Question A21-H-Leetcode-3788 (Points: 1):
+    #   google/gemma-3-27b-it@preset/fp8: 0.82/1 pts
+    question_pattern = re.compile(
+        r'Question ([\w\-]+) \(Points: \d+\):\n((?:  .+\n?)+)',
+        re.MULTILINE
+    )
+    
+    for q_match in question_pattern.finditer(addendum_text):
+        q_code = q_match.group(1)
+        model_lines = q_match.group(2)
+        scores[q_code] = {}
+        
+        # Parse model scores within this question
+        # Format: "  model_name: 0.82/1 pts"
+        model_pattern = re.compile(r'  (.+): ([\d.]+)/[\d.]+ pts')
+        for m_match in model_pattern.finditer(model_lines):
+            model_name = m_match.group(1)
+            score = float(m_match.group(2))
+            scores[q_code][model_name] = score
+    
+
+    return scores
+
+
+def parse_source_rankings(content: str) -> Dict[str, Tuple[float, float, str]]:
+    """
+    Parses 'FINAL MODEL RANKINGS' to extract pre-calculated totals.
+    Returns: {model_name: (score, possible_points, formatted_string)}
+    """
+    rankings = {}
+    
+    # Try different header formats just in case
+    header_patterns = [
+        r"FINAL MODEL RANKINGS \(Automated \+ Human Evaluation\)",
+        r"FINAL MODEL RANKINGS \(Automated Evaluation Only\)",
+        r"FINAL MODEL RANKINGS"
+    ]
+    
+    start_idx = -1
+    lines = content.split('\n')
+    
+    for i, line in enumerate(lines):
+        for pattern in header_patterns:
+            if re.search(pattern, line):
+                start_idx = i
+                break
+        if start_idx != -1:
+            break
+            
+    if start_idx == -1:
+        return rankings
+        
+    # Read until end of section (e.g. # lines or empty lines)
+    # Looking for lines like: "1. model: score/max ... "
+    rank_pattern = re.compile(r"^\d+\.\s+(.+?):\s+([\d.]+)/([\d.]+)\s+points")
+    
+    for i in range(start_idx + 1, len(lines)):
+        line = lines[i].strip()
+        if not line:
+            continue
+        if line.startswith("#") or line.startswith("="):
+            continue
+            
+        match = rank_pattern.match(line)
+        if match:
+            model = match.group(1).strip()
+            score = float(match.group(2))
+            possible = float(match.group(3))
+            rankings[model] = (score, possible, line)
+        elif line and not rank_pattern.match(line) and i > start_idx + 5:
+            # Stop if we hit non-ranking lines after some headers
+            break
+            
+    return rankings
+
+
+
+def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, Any]], Dict[str, Tuple[float, float, str]]]:
     """
     Parses a benchmark_results_advanced_*.txt file.
     Returns:
         question_codes: List[str] - The list of questions found in the file.
         all_results: Dict - structure compatible with reporting.py
                      {question_code: {model_name: {stats...}}}
+        source_rankings: Dict - extracted Final Model Rankings from source file
+                         {model_name: (score, possible, formatted_string)}
     """
     logger.info(f"Parsing file: {filepath}")
     
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
+    
+    # Parse Human Evaluation Addendum scores first (if present)
+    human_eval_scores = parse_human_eval_addendum(content)
 
     # Split by Question headers
     # Format: ####################################################################################################
@@ -77,7 +182,7 @@ def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, A
     # The first split is the header/summary, ignore it
     if len(question_sections) < 2:
         logger.error("No questions found in file parsing.")
-        return [], {}
+        return [], {}, {}
         
     question_codes = []
     all_results = {}
@@ -198,7 +303,19 @@ def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, A
                 
                 all_results[q_code][model_name]["runs"].append(run_data)
 
-    return question_codes, all_results
+    # Apply Human Evaluation Addendum scores (overrides automated scores)
+    if human_eval_scores:
+        logger.info(f"Applying human evaluation scores for {len(human_eval_scores)} questions")
+        for q_code, model_scores in human_eval_scores.items():
+            if q_code in all_results:
+                for model_name, score in model_scores.items():
+                    if model_name in all_results[q_code]:
+                        all_results[q_code][model_name]["score"] = score
+                        
+    # Extract source rankings if present
+    source_rankings = parse_source_rankings(content)
+
+    return question_codes, all_results, source_rankings
 
 def get_available_files() -> List[str]:
     """Returns sorted list of available advanced result files."""
@@ -288,7 +405,18 @@ def main():
     parsed_data = [] # List of (filename, q_codes, results, file_models)
     
     for fpath in selected_files:
-        q_codes, results = parse_advanced_file(fpath)
+        try:
+            q_codes, results, src_rankings = parse_advanced_file(fpath)
+        except ValueError:
+            # Fallback for unexpected return signature if module reload issues (unlikely in script)
+            # But just in case
+            ret = parse_advanced_file(fpath)
+            if len(ret) == 2:
+                q_codes, results = ret
+                src_rankings = {}
+            else:
+                q_codes, results, src_rankings = ret
+
         if not q_codes:
             print(f"Skipping {os.path.basename(fpath)}: Failed to parse or empty.")
             continue
@@ -305,7 +433,8 @@ def main():
             "results": results,
             "models": current_file_models,
             "q_set": set(q_codes),
-            "m_set": set(current_file_models)
+            "m_set": set(current_file_models),
+            "source_rankings": src_rankings
         })
 
     if not parsed_data:
@@ -353,6 +482,7 @@ def main():
     combined_question_codes = [] 
     combined_all_results = {} 
     source_metadata = [] 
+    all_source_rankings = []
 
     first_file_questions = reference["q_codes"]
     first_file_models = reference["models"]
@@ -365,6 +495,10 @@ def main():
         q_codes = data["q_codes"]
         results = data["results"]
         current_file_models = data["models"]
+        
+        # Collect source rankings if available
+        if "source_rankings" in data:
+            all_source_rankings.append(data["source_rankings"])
         
         # Metadata
         source_metadata.append({
@@ -390,19 +524,25 @@ def main():
                         combined_all_results[q_code][model_name] = res
 
             elif combine_mode == "questions":
-                # Warn if overlap
-                if not set(q_codes).isdisjoint(set(first_file_questions)):
-                     overlap = set(q_codes).intersection(set(first_file_questions))
-                     print(f"WARNING: Questions {list(overlap)} appear in both files.")
-                     print("Proceeding will overwrite earlier entries...")
+                # In 'questions' mode, models are same (checked by inference).
+                # We need to add NEW questions to the combined set.
                 
-                # Merge
-                for q_code in q_codes:
+                # Warn if overlap in questions (shouldn't happen if splitting logic was clean, but possible)
+                if not set(q_codes).isdisjoint(set(combined_question_codes)):
+                     overlap = set(q_codes).intersection(set(combined_question_codes))
+                     if i > 0: # Don't warn on first file
+                        print(f"WARNING: Questions {list(overlap)} appear in both files.")
+                        print("Proceeding will overwrite earlier entries for overlapping questions...")
+
+                # Merge Results and Update Question List
+                for q_code, model_dict in results.items():
                     if q_code not in combined_all_results:
+                        # New question found
                         combined_question_codes.append(q_code)
-                        combined_all_results[q_code] = results[q_code]
+                        combined_all_results[q_code] = model_dict
                     else:
-                        combined_all_results[q_code].update(results[q_code])
+                        # Overlapping question: update/overwrite model data
+                        combined_all_results[q_code].update(model_dict)
     
     if not combined_all_results:
         print("No results merged.")
@@ -473,13 +613,152 @@ def main():
     )
     print(f"[SUCCESS] Generated Advanced Results: {adv_path}")
     
-    # 4. Console Summary
+    # 4. Append Human Evaluation Addendum if there are human eval questions with scores
+    human_eval_codes = [
+        code for code in valid_codes 
+        if questions_data.get(code, {}).get("is_manual_check", False)
+    ]
+    
+    if human_eval_codes:
+        # Check if any human eval question has a non-zero score (indicating completed eval)
+        has_human_scores = any(
+            combined_all_results.get(code, {}).get(model, {}).get("score", 0) > 0
+            for code in human_eval_codes
+            for model in all_models
+        )
+        
+        # Always append if we have human eval codes since scores were parsed from source files
+        append_human_eval_summary(
+            adv_path, txt_path, all_models, valid_codes, 
+            combined_all_results, questions_data,
+            source_rankings=all_source_rankings,
+            combine_mode=combine_mode
+        )
+    
+    # 5. Console Summary
     print_final_rankings(
         all_models,
         valid_codes,
         combined_all_results,
         questions_data
     )
+
+
+def append_human_eval_summary(
+    adv_path: str,
+    txt_path: str,
+    models: List[str],
+    question_codes: List[str],
+    all_results: Dict[str, Dict[str, Any]],
+    questions_data: Dict[str, Dict[str, Any]],
+    source_rankings: List[Dict[str, Tuple[float, float, str]]] | None = None,
+    combine_mode: str = "models"
+) -> None:
+    """
+    Appends Human Evaluation Addendum and Final Rankings to result files.
+    
+    Args:
+        source_rankings: List of ranking dicts from source files. 
+                         If provided, we aggregate these to form the final list 
+                         instead of recalculating.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    human_eval_codes = [
+        code for code in question_codes 
+        if questions_data.get(code, {}).get("is_manual_check", False)
+    ]
+    
+    # Build the addendum content
+    addendum_lines = [
+        "",
+        "=" * 80,
+        f"HUMAN EVALUATION ADDENDUM ({timestamp})",
+        "=" * 80,
+        "",
+        "The following scores reflect human evaluation results:",
+        ""
+    ]
+    
+    for code in human_eval_codes:
+        points = questions_data.get(code, {}).get("points", 1)
+        addendum_lines.append(f"Question {code} (Points: {points}):")
+        
+        for model in models:
+            score = all_results.get(code, {}).get(model, {}).get("score", 0.0)
+            addendum_lines.append(f"  {model}: {score:.2f}/{points} pts")
+        addendum_lines.append("")
+    
+    addendum_lines.append("=" * 80)
+    addendum_lines.append("")
+    
+    addendum_lines.append("#" * 80)
+    addendum_lines.append("FINAL MODEL RANKINGS (Automated + Human Evaluation)")
+    addendum_lines.append("#" * 80)
+
+    # Decide strategy for final rankings
+    # Strategy 1: Use sourced rankings if available for ALL models (User Request)
+    # Strategy 2: Recalculate (Fallback)
+    
+    used_sourced_rankings = False
+    
+    used_sourced_rankings = False
+    
+    # Only use source rankings if we are combining distinct models (Score A from File 1 + Score B from File 2)
+    # If we are combining questions (Score A_part1 + Score A_part2), we MUST sum them up.
+    if combine_mode == "models" and source_rankings:
+        # Merge all source rankings into one dict
+        merged_rankings = {}
+        for src in source_rankings:
+            merged_rankings.update(src)
+            
+        # Check if we have rankings for all current models
+        # Note: source_rankings[model] = (score, possible, formatted_string)
+        if all(m in merged_rankings for m in models):
+            # Sort by score descending
+            ranked = sorted(merged_rankings.items(), key=lambda x: x[1][0], reverse=True)
+            
+            for rank, (model, (score, possible, orig_line)) in enumerate(ranked, 1):
+                # We reuse the formatted line's suffix if we can, 
+                # OR we reconstruct to ensure exact "score" value is used as parsed.
+                # The user wants exact match.
+                
+                percentage = (score / possible * 100) if possible > 0 else 0
+                addendum_lines.append(f"{rank}. {model}: {score:.2f}/{possible:.2f} points ({percentage:.1f}%)")
+            
+            used_sourced_rankings = True
+    
+    if not used_sourced_rankings:
+        # Recalculate (Fallback)
+        total_scores = {}
+        total_possible = sum(questions_data.get(code, {}).get("points", 1) for code in question_codes)
+        
+        for model in models:
+            total_scores[model] = sum(
+                all_results.get(code, {}).get(model, {}).get("score", 0.0)
+                for code in question_codes
+            )
+        
+        # Sort by score descending
+        ranked = sorted(total_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        for rank, (model, score) in enumerate(ranked, 1):
+            percentage = (score / total_possible * 100) if total_possible > 0 else 0
+            addendum_lines.append(f"{rank}. {model}: {score:.2f}/{total_possible} points ({percentage:.1f}%)")
+    
+    addendum_lines.append("#" * 80)
+    addendum_lines.append("")
+    
+    addendum_text = "\n".join(addendum_lines)
+    
+    # Append to advanced results file
+    with open(adv_path, "a") as f:
+        f.write(addendum_text)
+    
+    # Append to standard results file
+    with open(txt_path, "a") as f:
+        f.write(addendum_text)
+
 
 if __name__ == "__main__":
     main()

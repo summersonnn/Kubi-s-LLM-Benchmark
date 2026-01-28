@@ -32,6 +32,17 @@ def load_manifest(session_dir: str) -> Dict[str, Any]:
     return manifest
 
 
+import math
+
+def custom_round(val: float) -> float:
+    """
+    Custom rounding logic:
+    - 3rd decimal digit 0-5 -> round down (keep 2nd digit)
+    - 3rd decimal digit 6-9 -> round up (increment 2nd digit)
+    Equivalent formula: floor(val * 100 + 0.4) / 100
+    """
+    return math.floor(val * 100 + 0.4) / 100
+
 def calculate_scores(manifest: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
     """
     Calculates average scores per model per question.
@@ -56,7 +67,9 @@ def calculate_scores(manifest: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
             result[question_code] = {}
         
         avg = sum(scores) / len(scores) if scores else 0
-        result[question_code][model_name] = avg
+        # Apply custom rounding to the question-level score
+        rounded_avg = custom_round(avg)
+        result[question_code][model_name] = rounded_avg
     
     return result
 
