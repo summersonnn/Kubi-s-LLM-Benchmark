@@ -186,14 +186,9 @@ def write_advanced_results_file(
                     f.write("JUDGE EVALUATION:\n")
                     f.write(f"{judge_reasoning}\n\n")
                     
-                    f.write(f"JUDGE VERDICT: {judge_verdict}\n\n")
-                    
-                    # Final result for this run
-                    if "run_score" in run_result:
-                        evaluation = f"{run_result['run_score']}/{run_result['run_max']} pts"
-                    else:
-                        evaluation = "PASS" if run_result.get("success", False) else "FAIL"
-                    f.write(f"RUN RESULT: {evaluation}\n\n")
+                    # Only write JUDGE VERDICT if no granular SCORE exists (avoids redundancy)
+                    if not re.search(r'SCORE:[\d.]+/[\d.]+', judge_reasoning):
+                        f.write(f"JUDGE VERDICT: {judge_verdict}\n\n")
                 
                 f.write("\n" + "=" * 100 + "\n\n")
         
@@ -318,7 +313,7 @@ def write_results_file(
                 run_verdicts = []
                 for run in runs:
                     if "run_score" in run:
-                        run_verdicts.append(f"{run['run_score']}/{run['run_max']}")
+                        run_verdicts.append(f"{run['run_score']}/{points}")
                     elif run.get("success", False):
                         run_verdicts.append("PASS")
                     else:

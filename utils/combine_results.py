@@ -208,8 +208,7 @@ def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, A
                     "model_reasoning": None,
                     "judge_reasoning": "",
                     "judge_verdict": "",
-                    "run_score": None, # Optional granular score
-                    "run_max": None
+                    "run_score": None
                 }
                 
                 # Extract Response
@@ -237,22 +236,14 @@ def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, A
                 if verdict_match:
                     run_data["judge_verdict"] = verdict_match.group(1).strip()
                 
-                # Extract granular result if available
-                # RUN RESULT: 1/5 pts  OR  RUN RESULT: PASS
-                run_res_match = re.search(r'RUN RESULT: (.*)', run_text)
-                if run_res_match:
-                    res_str = run_res_match.group(1).strip()
-                    if "PASS" in res_str:
-                        run_data["success"] = True
-                    elif "FAIL" in res_str:
-                        run_data["success"] = False
-                    
-                    # Check for "X/Y pts"
-                    pts_match = re.match(r'(\d+)/(\d+)', res_str)
-                    if pts_match:
-                        run_data["run_score"] = int(pts_match.group(1))
-                        run_data["run_max"] = int(pts_match.group(2))
-                        run_data["success"] = (run_data["run_score"] > 0)
+                # Derive success from verdict
+                run_data["success"] = run_data["judge_verdict"].lower() == "pass"
+                
+                # Extract granular score from judge_reasoning if available (SCORE:X/Y)
+                score_match = re.search(r'SCORE:([\d.]+)/[\d.]+', run_data["judge_reasoning"])
+                if score_match:
+                    run_data["run_score"] = float(score_match.group(1))
+                    run_data["success"] = run_data["run_score"] > 0
                 
                 all_results[q_code][model_name]["runs"].append(run_data)
 

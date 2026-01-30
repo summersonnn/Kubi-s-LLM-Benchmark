@@ -248,14 +248,12 @@ class BenchmarkRunner:
                     
                     for r in runs:
                         reasoning = r.get("judge_reasoning", "")
-                        score_match = re.search(r'SCORE:([\d.]+)/([\d.]+)', reasoning)
+                        score_match = re.search(r'SCORE:([\d.]+)/[\d.]+', reasoning)
                         if score_match:
                             has_granular_scores = True
                             run_score = float(score_match.group(1))
-                            run_max = float(score_match.group(2))
                             r["run_score"] = run_score
-                            r["run_max"] = run_max
-                            total_run_score += (run_score / run_max) * points
+                            total_run_score += run_score
                         elif r.get("success", False):
                             total_run_score += points
                         # If neither score nor success, it's a 0 for this run
@@ -269,7 +267,7 @@ class BenchmarkRunner:
                         run_details = []
                         for r in runs:
                             if "run_score" in r:
-                                run_details.append(f"{r['run_score']}/{r['run_max']}")
+                                run_details.append(f"{r['run_score']}/{points}")
                             else:
                                 run_details.append("?" if not r.get("success") else "PASS")
                         logger.info("Model: %-30s | Score: %.2f/%d (runs: %s)", 
