@@ -131,7 +131,7 @@ def write_advanced_results_file(
             
             f.write("QUESTION TEXT:\n")
             f.write("-" * 100 + "\n")
-            # Skip full prompt for very long questions (e.g., A58 BattleShip)
+            # Skip full prompt for very long questions
             if len(question_text) > 1000:
                 f.write(f"[Prompt omitted - {len(question_text)} chars]\n")
             else:

@@ -134,7 +134,7 @@ class VerifierEvaluator:
         """
         import glob
         
-        # Extract base code (e.g., 'A58' from 'A58-BattleShip')
+        # Extract base code
         base_code = extract_base_question_code(question_code)
         
         # Look for a verifier file that starts with the base question code
