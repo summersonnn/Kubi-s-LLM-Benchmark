@@ -188,13 +188,10 @@ def load_questions_data(question_codes: List[str]) -> Tuple[Dict[str, Dict[str, 
 
         # Determine evaluation type from filename markers
         question_basename = os.path.basename(question_path)
-        is_human_eval = "-H-" in question_basename
         is_verifier_eval = "-V-" in question_basename
 
         # Determine Evaluation Type
-        if is_human_eval:
-            eval_type = "eval by HumanEval"
-        elif is_verifier_eval:
+        if is_verifier_eval:
             eval_type = "eval by verifier scripts"
         elif "-J-" in question_basename:
             eval_type = "eval by Judge LLM"
@@ -210,7 +207,6 @@ def load_questions_data(question_codes: List[str]) -> Tuple[Dict[str, Dict[str, 
             "ground_truth": ground_truth if ground_truth else "N/A",
             "points": points,
             "eval_type": eval_type,
-            "is_manual_check": is_human_eval,
             "is_verifier_eval": is_verifier_eval,
             "category": category,
             "subcategory": subcategory

@@ -192,8 +192,7 @@ def clear_history() -> None:
 
     directories_to_clear = [
         "results",
-        "results_advanced",
-        "manual_run_codes"
+        "results_advanced"
     ]
 
     for dir_name in directories_to_clear:

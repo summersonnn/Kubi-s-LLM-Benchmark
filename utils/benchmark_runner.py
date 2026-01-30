@@ -15,7 +15,7 @@ from openai import OpenAIError
 
 from utils.model_api import ModelAPI
 from utils.utils import kill_process_on_port
-from utils.evaluators import JudgeLLMEvaluator, HumanEvaluator, VerifierEvaluator
+from utils.evaluators import JudgeLLMEvaluator, VerifierEvaluator
 from utils.question_loader import discover_question_codes, load_questions_data
 from utils.reporting import (
     print_benchmark_summary,
@@ -39,7 +39,6 @@ class BenchmarkRunner:
         try:
             self.api = ModelAPI()
             self.judge = JudgeLLMEvaluator()
-            self.human_eval = HumanEvaluator()
             self.verifier_eval = VerifierEvaluator()
         except (ValueError, Exception) as e:
             logger.error("Failed to initialize system: %s", e)
@@ -53,8 +52,7 @@ class BenchmarkRunner:
         question: str,
         ground_truth: Optional[str],
         points: int,
-        is_verifier_eval: bool = False,
-        is_manual_check: bool = False
+        is_verifier_eval: bool = False
     ) -> Dict[str, Any]:
         """
         Executes a single run for a model on a question and returns the result.
@@ -90,11 +88,6 @@ class BenchmarkRunner:
                 is_successful = eval_result["success"]
                 judge_reasoning = eval_result["reasoning"]
                 judge_verdict = eval_result["verdict"]
-            elif is_manual_check:
-                self.human_eval.evaluate(question, content)
-                is_successful = False
-                judge_reasoning = "Registered for Human Evaluation"
-                judge_verdict = "Pending"
             elif ground_truth:
                 eval_result = await self.judge.evaluate(question, ground_truth, content, points=points)
                 is_successful = eval_result["success"]
@@ -156,31 +149,13 @@ class BenchmarkRunner:
         # Generate a single timestamp for all output files in this run
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Check if any manual check questions exist and start session
-        has_manual_checks = any(
-            questions_data[code].get("is_manual_check", False)
-            for code in valid_question_codes
-        )
-
-        if has_manual_checks:
-            self.human_eval.start_session(run_timestamp)
-
-        # Partition questions: human eval first, then automated
-        human_eval_codes = [c for c in valid_question_codes 
-                            if questions_data[c].get("is_manual_check", False)]
-        non_human_eval_codes = [c for c in valid_question_codes 
-                                if not questions_data[c].get("is_manual_check", False)]
-        sorted_question_codes = human_eval_codes + non_human_eval_codes
+        sorted_question_codes = valid_question_codes
         
         # Print Summary to Console
         print_benchmark_summary(self.api.models, questions_data, valid_question_codes)
 
         logger.info(f"Sliding Window execution enabled: Max workers = {self.max_workers}")
 
-        # Track whether subprocess has been spawned
-        human_eval_server_spawned = False
-        human_eval_remaining = len(human_eval_codes)
-        
         # Track exception for try/finally
         benchmark_exception = None
         processed_any_question = False
@@ -189,11 +164,11 @@ class BenchmarkRunner:
         semaphore = asyncio.Semaphore(self.max_workers)
 
         async def run_with_semaphore(
-            model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval, is_manual_check
+            model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval
         ):
             async with semaphore:
                 return await self._process_single_run(
-                    model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval, is_manual_check
+                    model_name, model_index, question_code, question, ground_truth, points, is_verifier_eval
                 )
 
         # Task Wrapper
@@ -241,8 +216,7 @@ class BenchmarkRunner:
                             question=question,
                             ground_truth=gt_for_run,
                             points=points,
-                            is_verifier_eval=questions_data[code].get("is_verifier_eval", False),
-                            is_manual_check=questions_data[code].get("is_manual_check", False)
+                            is_verifier_eval=questions_data[code].get("is_verifier_eval", False)
                         )
                         task = wrapped_task(model_name, run_idx, code, coro)
                         all_tasks.append(task)
@@ -274,17 +248,17 @@ class BenchmarkRunner:
                     
                     for r in runs:
                         reasoning = r.get("judge_reasoning", "")
-                        score_match = re.search(r'SCORE:(\d+)/(\d+)', reasoning)
+                        score_match = re.search(r'SCORE:([\d.]+)/([\d.]+)', reasoning)
                         if score_match:
                             has_granular_scores = True
-                            run_score = int(score_match.group(1))
-                            run_max = int(score_match.group(2))
+                            run_score = float(score_match.group(1))
+                            run_max = float(score_match.group(2))
                             r["run_score"] = run_score
                             r["run_max"] = run_max
                             total_run_score += (run_score / run_max) * points
-                        else:
-                            if r.get("success", False):
-                                total_run_score += points
+                        elif r.get("success", False):
+                            total_run_score += points
+                        # If neither score nor success, it's a 0 for this run
                     
                     score = total_run_score / self.num_runs if self.num_runs > 0 else 0
                     all_results[q_code][model_name]["score"] = score
@@ -305,37 +279,6 @@ class BenchmarkRunner:
                         logger.info("Model: %-30s | Score: %.2f/%d (%d/%d PASS)", 
                                     model_name, score, points, success_count, self.num_runs)
                 logger.info("=" * 60 + "\n")
-
-                nonlocal human_eval_server_spawned, human_eval_remaining
-                if (has_manual_checks 
-                    and q_code in human_eval_codes):
-                    human_eval_remaining -= 1
-                    
-                if (has_manual_checks 
-                    and human_eval_remaining == 0 
-                    and not human_eval_server_spawned):
-                    
-                    # We only spawn if ALL human eval questions are done. 
-                    # Although user might want it earlier? 
-                    # The original logic spawned when the "chunk" containing the last code finished.
-                    # Here we spawn when the last code specifically finishes.
-                    
-                    self.human_eval.finalize_session()
-                    session_dir = self.human_eval.get_session_dir()
-                    logger.info("SPAWNING HUMAN EVALUATION SERVER")
-                    
-                    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    server_script = os.path.join(project_root, "utils", "human_eval_server.py")
-                    
-                    logger.info("Launching: %s %s", server_script, session_dir)
-                    kill_process_on_port(8765)
-                    import subprocess
-                    subprocess.Popen(
-                        [sys.executable, server_script, session_dir],
-                        cwd=project_root
-                    )
-                    human_eval_server_spawned = True
-
 
             # Process tasks as they complete
             if all_tasks:
@@ -367,14 +310,6 @@ class BenchmarkRunner:
                         logger.info("    [%s] Run (%d/%d) for %s: %s", 
                                     model_name, completed_counts[(q_code, model_name)], self.num_runs, q_code, status)
                         
-                        if questions_data[q_code].get("is_manual_check", False):
-                            self.human_eval.save_implementation(
-                                model_name=model_name,
-                                question_code=q_code,
-                                run_index=run_idx,
-                                html_content=result.get("response", ""),
-                                max_points=questions_data[q_code]["points"]
-                            )
                     
                     # Check if this question is now fully complete
                     if runs_remaining[q_code] == 0:
@@ -422,55 +357,11 @@ class BenchmarkRunner:
             
             logger.info("[+] Advanced results file written to: %s", advanced_results_path)
             
-            # Update manifest with results file paths so integrate_scores uses the correct files
-            if has_manual_checks:
-                self.human_eval.update_results_paths(results_file_path, advanced_results_path)
-                
-                # Store data needed for HTML generation (to be done after human eval completes)
-                self.human_eval.store_html_generation_data(
-                    models=self.api.models,
-                    question_codes=valid_question_codes,
-                    all_results=all_results,
-                    questions_data=questions_data,
-                    timestamp=run_timestamp
-                )
-                
-                # Check if human evaluation is already complete
-                session_dir = self.human_eval.get_session_dir()
-                manifest_path = os.path.join(session_dir, "manifest.json")
-                
-                import json
-                with open(manifest_path, "r") as f:
-                    manifest = json.load(f)
-                
-                if manifest.get("scores_collected", False):
-                    # Human eval finished before benchmark - integrate now
-                    logger.info("\n" + "=" * 60)
-                    logger.info("INTEGRATING HUMAN EVALUATION SCORES")
-                    logger.info("=" * 60)
-                    
-                    from utils.integrate_human_scores import integrate_scores
-                    integrate_scores(session_dir)
-                    
-                    logger.info("Human evaluation scores integrated into results files.")
-
-                else:
-                    # Human eval still in progress - HTML will be generated after integration
-                    logger.info("\n" + "=" * 60)
-                    logger.info("HUMAN EVALUATION IN PROGRESS")
-                    logger.info("=" * 60)
-                    logger.info("Human evaluation server is running in the background.")
-                    logger.info("Session directory: %s", session_dir)
-                    logger.info("Complete scoring in the browser windows.")
-                    logger.info("Run 'uv run python utils/integrate_human_scores.py %s' after completion.", session_dir)
-                    logger.info("The integration script will update results and generate the performance table.")
-
-            else:
-                # No human eval questions - generate HTML immediately
-                html_path = generate_performance_html(
-                    self.api.models, valid_question_codes, all_results, questions_data, run_timestamp
-                )
-                logger.info(" Performance table generated: file://%s", html_path)
+            # No human eval questions - generate HTML immediately
+            html_path = generate_performance_html(
+                self.api.models, valid_question_codes, all_results, questions_data, run_timestamp
+            )
+            logger.info(" Performance table generated: file://%s", html_path)
             
             # Log rankings to console at the very end
             print_final_rankings(self.api.models, valid_question_codes, all_results, questions_data)

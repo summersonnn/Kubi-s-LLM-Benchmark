@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 
 def calculate_model_rankings(
     models: List[str],
-    question_codes: List[str], # These should be the filtered codes (e.g. non_human_eval_codes)
+    question_codes: List[str],
     all_results: Dict[str, Dict[str, Any]],
     questions_data: Dict[str, Dict[str, Any]]
 ) -> Tuple[List[Tuple[str, float]], Dict[str, Tuple[int, float]], float]:
@@ -189,9 +189,7 @@ def write_advanced_results_file(
                     f.write(f"JUDGE VERDICT: {judge_verdict}\n\n")
                     
                     # Final result for this run
-                    if judge_verdict == "Pending":
-                        evaluation = "PENDING (Human Eval Required)"
-                    elif "run_score" in run_result:
+                    if "run_score" in run_result:
                         evaluation = f"{run_result['run_score']}/{run_result['run_max']} pts"
                     else:
                         evaluation = "PASS" if run_result.get("success", False) else "FAIL"
@@ -199,42 +197,22 @@ def write_advanced_results_file(
                 
                 f.write("\n" + "=" * 100 + "\n\n")
         
-        # Rankings section (only for non-human-eval questions)
-        # Check if there are any non-human-eval questions
-        non_human_eval_codes = [code for code in question_codes 
-                                if not questions_data.get(code, {}).get("is_manual_check", False)]
+        # Rankings section
+        f.write("\n" + "#" * 100 + "\n")
+        f.write("MODEL RANKINGS\n")
+        f.write("#" * 100 + "\n\n")
         
-        if non_human_eval_codes:
-            f.write("\n" + "#" * 100 + "\n")
-            f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
-            f.write("#" * 100 + "\n\n")
-            
-            # Calculate rankings using helper
-            ranked, usage, total_possible_points = calculate_model_rankings(
-                models, non_human_eval_codes, all_results, questions_data
-            )
-            
-            for rank, (model, score) in enumerate(ranked, 1):
-                percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
-                tokens, cost = usage[model]
-                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}\n")
-            
-            f.write("\n" + "=" * 100 + "\n")
+        # Calculate rankings using helper
+        ranked, usage, total_possible_points = calculate_model_rankings(
+            models, question_codes, all_results, questions_data
+        )
         
-        # Note about human eval questions if any exist
-        human_eval_codes = [code for code in question_codes 
-                            if questions_data.get(code, {}).get("is_manual_check", False)]
-        if human_eval_codes:
-            f.write("\n" + "#" * 100 + "\n")
-            f.write("HUMAN EVALUATION PENDING\n")
-            f.write("#" * 100 + "\n\n")
-            f.write("The following questions require human evaluation:\n")
-            for code in human_eval_codes:
-                points = questions_data.get(code, {}).get("points", 1)
-                f.write(f"  - {code} ({points} points)\n")
-            f.write("\nHuman evaluation server was spawned automatically.\n")
-            f.write("Complete scoring in the browser windows - this report will be updated.\n")
-            f.write("\n" + "=" * 100 + "\n")
+        for rank, (model, score) in enumerate(ranked, 1):
+            percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+            tokens, cost = usage[model]
+            f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}\n")
+        
+        f.write("\n" + "=" * 100 + "\n")
     
     return filepath
 
@@ -248,27 +226,19 @@ def print_final_rankings(
     """
     Prints the final model rankings to the console.
     """
-    # Filter for non-human eval codes if not already filtered, but typically
-    # the caller should pass the correct list. We'll handle both cases safely.
-    non_human_eval_codes = [
-        code for code in question_codes 
-        if not questions_data.get(code, {}).get("is_manual_check", False)
-    ]
-
-    if non_human_eval_codes:
-        print("\n" + "#" * 60)
-        print("FINAL MODEL RANKINGS (Automated Evaluation)")
-        print("#" * 60)
-        
-        ranked, usage, total_possible_points = calculate_model_rankings(
-            models, non_human_eval_codes, all_results, questions_data
-        )
-        
-        for rank, (model, score) in enumerate(ranked, 1):
-            percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
-            tokens, cost = usage[model]
-            print(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}")
-        print("#" * 60 + "\n")
+    print("\n" + "#" * 60)
+    print("FINAL MODEL RANKINGS")
+    print("#" * 60)
+    
+    ranked, usage, total_possible_points = calculate_model_rankings(
+        models, question_codes, all_results, questions_data
+    )
+    
+    for rank, (model, score) in enumerate(ranked, 1):
+        percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+        tokens, cost = usage[model]
+        print(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}")
+    print("#" * 60 + "\n")
 
 
 
@@ -339,65 +309,40 @@ def write_results_file(
                 expected = questions_data.get(code, {}).get("ground_truth", "N/A")
                 score = model_data.get("score", 0.0)
                 points = questions_data.get(code, {}).get("points", 1)
-                is_human_eval = questions_data.get(code, {}).get("is_manual_check", False)
                 
                 f.write(f"Question {idx} ({code}):\n")
                 f.write(f"  Expected: {expected}\n")
-                
-                if is_human_eval:
-                    f.write("  Score: PENDING (Human Eval)\n")
-                    f.write("  Runs: PENDING\n\n")
-                else:
-                    f.write(f"  Score: {score:.2f}/{points}\n")
-                    # List brief verdict for each run (with granular scores if available)
-                    runs = model_data.get("runs", [])
-                    run_verdicts = []
-                    for run in runs:
-                        if "run_score" in run:
-                            run_verdicts.append(f"{run['run_score']}/{run['run_max']}")
-                        elif run.get("success", False):
-                            run_verdicts.append("PASS")
-                        else:
-                            run_verdicts.append("FAIL")
-                    f.write(f"  Runs: {', '.join(run_verdicts)}\n\n")
+                f.write(f"  Score: {score:.2f}/{points}\n")
+                # List brief verdict for each run (with granular scores if available)
+                runs = model_data.get("runs", [])
+                run_verdicts = []
+                for run in runs:
+                    if "run_score" in run:
+                        run_verdicts.append(f"{run['run_score']}/{run['run_max']}")
+                    elif run.get("success", False):
+                        run_verdicts.append("PASS")
+                    else:
+                        run_verdicts.append("FAIL")
+                f.write(f"  Runs: {', '.join(run_verdicts)}\n\n")
             
             f.write("\n")
         
-        # Rankings (only for non-human-eval questions)
-        non_human_eval_codes = [code for code in question_codes 
-                                if not questions_data.get(code, {}).get("is_manual_check", False)]
+        # Rankings
+        f.write("=" * 80 + "\n")
+        f.write("MODEL RANKINGS\n")
+        f.write("=" * 80 + "\n\n")
         
-        if non_human_eval_codes:
-            f.write("=" * 80 + "\n")
-            f.write("MODEL RANKINGS (Automated Evaluation Only)\n")
-            f.write("=" * 80 + "\n\n")
-            
-            # Calculate rankings using helper
-            ranked, usage, total_possible_points = calculate_model_rankings(
-                models, non_human_eval_codes, all_results, questions_data
-            )
-            
-            for rank, (model, score) in enumerate(ranked, 1):
-                percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
-                tokens, cost = usage[model]
-                f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}\n")
-            
-            f.write("\n" + "=" * 80 + "\n")
+        # Calculate rankings using helper
+        ranked, usage, total_possible_points = calculate_model_rankings(
+            models, question_codes, all_results, questions_data
+        )
         
-        # Note about human eval questions
-        human_eval_codes = [code for code in question_codes 
-                           if questions_data.get(code, {}).get("is_manual_check", False)]
-        if human_eval_codes:
-            f.write("\n" + "=" * 80 + "\n")
-            f.write("HUMAN EVALUATION PENDING\n")
-            f.write("=" * 80 + "\n\n")
-            f.write("Questions pending human evaluation:\n")
-            for code in human_eval_codes:
-                points = questions_data.get(code, {}).get("points", 1)
-                f.write(f"  - {code} ({points} points)\n")
-            f.write("\nHuman evaluation server was spawned automatically.\n")
-            f.write("Complete scoring in the browser windows - this report will be updated.\n")
-            f.write("\n" + "=" * 80 + "\n")
+        for rank, (model, score) in enumerate(ranked, 1):
+            percentage = (score / total_possible_points * 100) if total_possible_points > 0 else 0
+            tokens, cost = usage[model]
+            f.write(f"{rank}. {model}: {score:.2f}/{total_possible_points} points ({percentage:.1f}%) - {tokens} tokens - ${cost:.3f}\n")
+        
+        f.write("\n" + "=" * 80 + "\n")
     
     return filepath
 
