@@ -1,5 +1,9 @@
 from bs4 import BeautifulSoup
 import re
+import os
+import sys
+import glob
+from datetime import datetime
 
 def calculate_multiplier(success_rate):
     """
@@ -140,8 +144,58 @@ def process_leaderboard(input_file, output_file):
     print(f"Leaderboard V2 generated: {output_file}")
     print(f"Total New Points Available: {new_total_points:.2f}")
 
-# --- Execution ---
-input_filename = 'original.html'
-output_filename = 'performance_table_v2.html'
+def get_available_files() -> list[str]:
+    """Returns sorted list of available HTML result files."""
+    # Project root is one level up from utils/
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    results_dir = os.path.join(project_root, "results")
+    files = glob.glob(os.path.join(results_dir, "performance_table_*.html"))
+    # Sort by timestamp (descending)
+    files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    return files
 
-process_leaderboard(input_filename, output_filename)
+def main():
+    print("="*60)
+    print("      BENCHMARK POINT ADJUSTER (V2)")
+    print("="*60)
+    
+    files = get_available_files()
+    
+    if not files:
+        print("No performance table files found in 'results/'")
+        return
+
+    print("\nAvailable Files:")
+    for idx, f in enumerate(files, 1):
+        mtime = os.path.getmtime(f)
+        ts_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{idx}. {os.path.basename(f)} (Date: {ts_str})")
+    
+    print("\nSelect a file to adjust (ID):")
+    selection = input("> ").strip()
+    
+    try:
+        idx = int(selection)
+        if 1 <= idx <= len(files):
+            input_file = files[idx-1]
+        else:
+            print(f"Error: Index {idx} out of range.")
+            return
+    except ValueError:
+        print("Invalid input.")
+        return
+
+    # Determine output filename
+    # e.g., performance_table_20260201_170000.html -> performance_table_V2_20260201_170000.html
+    base_name = os.path.basename(input_file)
+    output_name = base_name.replace("performance_table_", "performance_table_V2_")
+    if output_name == base_name: # Fallback if prefix doesn't match
+        output_name = "V2_" + base_name
+        
+    output_file = os.path.join(os.path.dirname(input_file), output_name)
+    
+    print(f"\nProcessing: {base_name}")
+    process_leaderboard(input_file, output_file)
+
+if __name__ == "__main__":
+    main()
