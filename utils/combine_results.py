@@ -228,7 +228,7 @@ def parse_advanced_file(filepath: str) -> Tuple[List[str], Dict[str, Dict[str, A
                 # ...
                 # JUDGE VERDICT: Pass
                 
-                judge_eval_match = re.search(r'JUDGE EVALUATION:\n(.*?)(?=\nJUDGE VERDICT:)', run_text, re.DOTALL)
+                judge_eval_match = re.search(r'JUDGE EVALUATION:\n(.*?)(?=\nJUDGE VERDICT:|\n\n--- RUN|$)', run_text, re.DOTALL)
                 if judge_eval_match:
                     run_data["judge_reasoning"] = judge_eval_match.group(1).strip()
                     
