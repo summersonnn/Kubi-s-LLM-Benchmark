@@ -5,6 +5,7 @@ Includes JudgeLLMEvaluator for automated assessment and VerifierEvaluator for ru
 
 import json
 import os
+import re
 import asyncio
 import random
 from typing import Any, Dict, Protocol
@@ -189,18 +190,15 @@ class VerifierEvaluator:
                 answer
             )
             
-            if is_valid:
-                return {
-                    "success": True,
-                    "reasoning": failure_reason,  # Contains detailed score info from checker
-                    "verdict": "Pass"
-                }
-            else:
-                return {
-                    "success": False,
-                    "reasoning": failure_reason,
-                    "verdict": "Fail"
-                }
+            # Extract score for verdict if present
+            score_match = re.search(r'SCORE:([\d.]+/[\d.]+)', failure_reason)
+            verdict = score_match.group(1) if score_match else ("Pass" if is_valid else "Fail")
+            
+            return {
+                "success": is_valid,
+                "reasoning": failure_reason,  # Contains detailed score info from checker
+                "verdict": verdict
+            }
         
         except Exception as e:
             logger.error("Error executing verifier script for %s: %s", question_code, e)
