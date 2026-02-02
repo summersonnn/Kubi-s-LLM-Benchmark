@@ -101,7 +101,7 @@ Point: 1
 ```
 
 For **Judge** questions (`-J-`), `Ground Truth` is the reference text for the judge.
-For **Verifier** questions (`-V-`), `Ground Truth` is ignored by the code (often set to "VALIDITY CHECK" or similar) because logic is handled by the script.
+For **Verifier** questions (`-V-`), `Ground Truth` is **optional/informational** (often set to "VALIDITY CHECK"). The verifier script handles all validation logic, so the system ignores this field.
 
 ## ➕ How to Add New Information
 
@@ -123,13 +123,15 @@ This requires two parts: the question file and the verification logic.
     ```text
     Calculate 2 + 2. Return answer in \boxed{}.
     ----
-    Ground Truth: VALIDITY CHECK
+    Ground Truth: 4 (This is optional for verifier questions. However, if you plan to generate the verifier using an LLM, it’s best to include this in the question file so the model knows the expected answer.)
     Point: 1
     ```
     *Note: The `-V-` in the filename triggers the verifier logic.*
 
 2.  **Create Verifier Script**:
     Create a python file in `verifier_scripts/` named exactly to match the question ID base: `A101_math_proof_verifier.py`.
+    
+    > **Tip**: Check `verifier_scripts/A9_longest_word_verifier_example.py` for a complete, well-commented example.
     
     *Structure:*
     ```python

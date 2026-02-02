@@ -16,6 +16,8 @@ wheels/
 results/
 results_advanced/
 questions/
-verifier_scripts/
+verifier_scripts/*
+!verifier_scripts/
+!verifier_scripts/A9_longest_word_verifier_example.py
 manual_run_codes/
 media/
