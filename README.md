@@ -2,6 +2,8 @@
 
 A flexible, automated framework for benchmarking Large Language Models (LLMs) across diverse question sets using two distinct evaluation methodologies: **Judge LLM** and **Deterministic Verifiers**.
 
+To see the leaderboard and the published questions for my personal benchmark, visit [here](https://summersonnn.github.io/Kubis-Benchmark-WebApp/).
+
 ## 🚀 Overview
 
 This benchmark evaluates models by running them against a set of queries defined in the `questions/` directory. It supports parallel execution, detailed logging, and generates both raw and aggregated performance reports.
@@ -56,7 +58,7 @@ anthropic/claude-3-opus
 
 To configure the **Judge LLM**, edit `config/judge_model.txt`:
 ```text
-google/gemini-2.0-flash-exp
+google/gemini-3-flash-preview
 ```
 
 ## 🏃 parameters
