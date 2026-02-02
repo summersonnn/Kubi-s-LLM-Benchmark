@@ -122,7 +122,7 @@ Verdict: <Pass/Fail>
 class VerifierEvaluator:
     """
     Evaluator that uses hardcoded logic to check if the answer adheres to specific rules.
-    Used when Ground Truth is set to 'VALIDITY CHECK'.
+    Used when Ground Truth is set to 'VERIFIER'.
     """
     def __init__(self) -> None:
         """Initialize the VerifierEvaluator."""
@@ -173,20 +173,20 @@ class VerifierEvaluator:
             import importlib
             verifier_module = importlib.import_module(f"{self.verifiers_dir}.{module_name}")
             
-            # Call the check_validity function
-            if not hasattr(verifier_module, "check_validity"):
-                logger.error("Verifier module %s does not have check_validity function", module_name)
+            # Call the verify_answer function
+            if not hasattr(verifier_module, "verify_answer"):
+                logger.error("Verifier module %s does not have verify_answer function", module_name)
                 return {
                     "success": False,
-                    "reasoning": "Invalid verifier module: missing check_validity function",
+                    "reasoning": "Invalid verifier module: missing verify_answer function",
                     "verdict": "Error"
                 }
             
-            # Run CPU-bound check_validity in executor
+            # Run CPU-bound verify_answer in executor
             loop = asyncio.get_running_loop()
             is_valid, failure_reason = await loop.run_in_executor(
                 None, 
-                verifier_module.check_validity, 
+                verifier_module.verify_answer, 
                 answer
             )
             

@@ -1,5 +1,5 @@
 """
-Validity checker for A15: Word with specific vowel/consonant constraints.
+Verifier checker for A9: Word with specific vowel/consonant constraints.
 
 Validates that the model's answer adheres to all the specified rules:
 - Contains exactly one 'o', one 'a', and one 'e'
@@ -18,7 +18,7 @@ import os
 _ENGLISH_WORDS_CACHE = None
 
 
-def check_validity(model_answer: str) -> tuple[bool, str]:
+def verify_answer(model_answer: str) -> tuple[bool, str]:
     """
     Check if the model's answer satisfies all the constraints for A15.
 

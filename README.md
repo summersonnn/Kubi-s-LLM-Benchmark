@@ -103,7 +103,7 @@ Point: 1
 ```
 
 For **Judge** questions (`-J-`), `Ground Truth` is the reference text for the judge.
-For **Verifier** questions (`-V-`), `Ground Truth` is **optional/informational** (often set to "VALIDITY CHECK"). The verifier script handles all validation logic, so the system ignores this field.
+For **Verifier** questions (`-V-`), `Ground Truth` is **optional/informational** (often set to "VERIFIER"). The verifier script handles all validation logic, so the system ignores this field.
 
 ## ➕ How to Add New Information
 
@@ -137,7 +137,7 @@ This requires two parts: the question file and the verification logic.
     
     *Structure:*
     ```python
-    def check_validity(answer: str) -> tuple[bool, str]:
+    def verify_answer(answer: str) -> tuple[bool, str]:
         """
         Validates the answer.
         Returns:
